@@ -217,8 +217,7 @@ impl<P: Package, VS: VersionSet, Priority: Ord + Clone> State<P, VS, Priority> {
         incompat_changed: bool,
         decision_level: DecisionLevel,
     ) -> Result<(), PubGrubError<P, VS>> {
-        self.partial_solution
-            .backtrack(decision_level, &self.incompatibility_store);
+        self.partial_solution.backtrack(decision_level);
         self.contradicted_incompatibilities.clear();
         if incompat_changed {
             self.merge_incompatibility(incompat)?;
