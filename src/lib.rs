@@ -102,8 +102,10 @@
 //!         &self,
 //!         package: &String,
 //!         version: &SemanticVersion,
-//!     ) -> Result<Dependencies<String, SemVS>, Box<dyn Error + Send + Sync>> {
-//!         unimplemented!()
+//!     ) -> Result<Dependencies<impl IntoIterator<Item = (String, SemVS)> + Clone>, Box<dyn Error + Send + Sync>>
+//!     {
+//!         unimplemented!();
+//!         Ok(Dependencies::Known([]))
 //!     }
 //! }
 //! ```
