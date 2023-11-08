@@ -105,11 +105,11 @@ impl<P: Package, VS: VersionSet> Incompatibility<P, VS> {
     }
 
     /// Build an incompatibility from a given dependency.
-    pub fn from_dependency(package: P, version: VS::V, dep: (&P, &VS)) -> Self {
+    pub fn from_dependency(package: P, version: VS::V, dep: (P, VS)) -> Self {
         let set1 = VS::singleton(version);
         let (p2, set2) = dep;
         Self {
-            package_terms: if set2 == &VS::empty() {
+            package_terms: if set2 == VS::empty() {
                 SmallMap::One([(package.clone(), Term::Positive(set1.clone()))])
             } else {
                 SmallMap::Two([
@@ -117,7 +117,7 @@ impl<P: Package, VS: VersionSet> Incompatibility<P, VS> {
                     (p2.clone(), Term::Negative(set2.clone())),
                 ])
             },
-            kind: Kind::FromDependencyOf(package, set1, p2.clone(), set2.clone()),
+            kind: Kind::FromDependencyOf(package, set1, p2, set2),
         }
     }
 
