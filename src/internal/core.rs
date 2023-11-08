@@ -18,13 +18,15 @@ use crate::report::DerivationTree;
 use crate::type_aliases::{DependencyConstraints, Map};
 use crate::version_set::VersionSet;
 
+use super::arena::{HashArena, Id};
+
 /// Current state of the PubGrub algorithm.
 #[derive(Clone)]
 pub struct State<P: Package, VS: VersionSet, Priority: Ord + Clone> {
-    root_package: P,
+    pub root_package: Id<P>,
     root_version: VS::V,
 
-    incompatibilities: Map<P, Vec<IncompId<P, VS>>>,
+    incompatibilities: Map<Id<P>, Vec<IncompId<P, VS>>>,
 
     /// Store the ids of incompatibilities that are already contradicted
     /// and will stay that way until the next conflict and backtrack is operated.
@@ -37,22 +39,27 @@ pub struct State<P: Package, VS: VersionSet, Priority: Ord + Clone> {
     /// The store is the reference storage for all incompatibilities.
     pub incompatibility_store: Arena<Incompatibility<P, VS>>,
 
+    /// The store is the reference storage for all incompatibilities.
+    pub package_store: HashArena<P>,
+
     /// This is a stack of work to be done in `unit_propagation`.
     /// It can definitely be a local variable to that method, but
     /// this way we can reuse the same allocation for better performance.
-    unit_propagation_buffer: SmallVec<P>,
+    pub unit_propagation_buffer: SmallVec<Id<P>>,
 }
 
 impl<P: Package, VS: VersionSet, Priority: Ord + Clone> State<P, VS, Priority> {
     /// Initialization of PubGrub state.
     pub fn init(root_package: P, root_version: VS::V) -> Self {
         let mut incompatibility_store = Arena::new();
+        let mut package_store = HashArena::new();
+        let root_package = package_store.alloc(root_package);
         let not_root_id = incompatibility_store.alloc(Incompatibility::not_root(
-            root_package.clone(),
+            root_package,
             root_version.clone(),
         ));
         let mut incompatibilities = Map::default();
-        incompatibilities.insert(root_package.clone(), vec![not_root_id]);
+        incompatibilities.insert(root_package, vec![not_root_id]);
         Self {
             root_package,
             root_version,
@@ -60,6 +67,7 @@ impl<P: Package, VS: VersionSet, Priority: Ord + Clone> State<P, VS, Priority> {
             contradicted_incompatibilities: rustc_hash::FxHashSet::default(),
             partial_solution: PartialSolution::empty(),
             incompatibility_store,
+            package_store,
             unit_propagation_buffer: SmallVec::Empty,
         }
     }
@@ -73,16 +81,21 @@ impl<P: Package, VS: VersionSet, Priority: Ord + Clone> State<P, VS, Priority> {
     /// Add an incompatibility to the state.
     pub fn add_incompatibility_from_dependencies(
         &mut self,
-        package: P,
+        package: Id<P>,
         version: VS::V,
         deps: &DependencyConstraints<P, VS>,
     ) -> std::ops::Range<IncompId<P, VS>> {
         // Create incompatibilities and allocate them in the store.
-        let new_incompats_id_range = self
-            .incompatibility_store
-            .alloc_iter(deps.iter().map(|dep| {
-                Incompatibility::from_dependency(package.clone(), version.clone(), dep)
-            }));
+        let new_incompats_id_range =
+            self.incompatibility_store
+                .alloc_iter(deps.iter().map(|dep| {
+                    let dep_pid = self.package_store.alloc(dep.0.clone());
+                    Incompatibility::from_dependency(
+                        package.clone(),
+                        version.clone(),
+                        (dep_pid, dep.1),
+                    )
+                }));
         // Merge the newly created incompatibilities with the older ones.
         for id in IncompId::range_to_iter(new_incompats_id_range.clone()) {
             self.merge_incompatibility(id);
@@ -92,7 +105,7 @@ impl<P: Package, VS: VersionSet, Priority: Ord + Clone> State<P, VS, Priority> {
 
     /// Unit propagation is the core mechanism of the solving algorithm.
     /// CF <https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation>
-    pub fn unit_propagation(&mut self, package: P) -> Result<(), PubGrubError<P, VS>> {
+    pub fn unit_propagation(&mut self, package: Id<P>) -> Result<(), PubGrubError<P, VS>> {
         self.unit_propagation_buffer.clear();
         self.unit_propagation_buffer.push(package);
         while let Some(current_package) = self.unit_propagation_buffer.pop() {
@@ -157,12 +170,12 @@ impl<P: Package, VS: VersionSet, Priority: Ord + Clone> State<P, VS, Priority> {
     fn conflict_resolution(
         &mut self,
         incompatibility: IncompId<P, VS>,
-    ) -> Result<(P, IncompId<P, VS>), PubGrubError<P, VS>> {
+    ) -> Result<(Id<P>, IncompId<P, VS>), PubGrubError<P, VS>> {
         let mut current_incompat_id = incompatibility;
         let mut current_incompat_changed = false;
         loop {
             if self.incompatibility_store[current_incompat_id]
-                .is_terminal(&self.root_package, &self.root_version)
+                .is_terminal(self.root_package, &self.root_version)
             {
                 return Err(PubGrubError::NoSolution(
                     self.build_derivation_tree(current_incompat_id),
@@ -188,7 +201,7 @@ impl<P: Package, VS: VersionSet, Priority: Ord + Clone> State<P, VS, Priority> {
                         let prior_cause = Incompatibility::prior_cause(
                             current_incompat_id,
                             satisfier_cause,
-                            &package,
+                            package,
                             &self.incompatibility_store,
                         );
                         log::info!("prior cause: {}", prior_cause);
@@ -250,7 +263,12 @@ impl<P: Package, VS: VersionSet, Priority: Ord + Clone> State<P, VS, Priority> {
 
     fn build_derivation_tree(&self, incompat: IncompId<P, VS>) -> DerivationTree<P, VS> {
         let shared_ids = self.find_shared_ids(incompat);
-        Incompatibility::build_derivation_tree(incompat, &shared_ids, &self.incompatibility_store)
+        Incompatibility::build_derivation_tree(
+            incompat,
+            &shared_ids,
+            &self.incompatibility_store,
+            &self.package_store,
+        )
     }
 
     fn find_shared_ids(&self, incompat: IncompId<P, VS>) -> Set<IncompId<P, VS>> {

@@ -73,6 +73,7 @@ use std::collections::{BTreeMap, BTreeSet as Set};
 use std::error::Error;
 
 use crate::error::PubGrubError;
+use crate::internal::arena::Id;
 use crate::internal::core::State;
 use crate::internal::incompatibility::Incompatibility;
 use crate::package::Package;
@@ -87,9 +88,9 @@ pub fn resolve<P: Package, VS: VersionSet>(
     package: P,
     version: impl Into<VS::V>,
 ) -> Result<SelectedDependencies<P, VS::V>, PubGrubError<P, VS>> {
-    let mut state = State::init(package.clone(), version.into());
-    let mut added_dependencies: Map<P, Set<VS::V>> = Map::default();
-    let mut next = package;
+    let mut state = State::init(package, version.into());
+    let mut added_dependencies: Map<Id<P>, Set<VS::V>> = Map::default();
+    let mut next = state.root_package;
     loop {
         dependency_provider
             .should_cancel()
@@ -103,22 +104,30 @@ pub fn resolve<P: Package, VS: VersionSet>(
             state.partial_solution
         );
 
-        let Some(highest_priority_pkg) = state
-            .partial_solution
-            .pick_highest_priority_pkg(|p, r| dependency_provider.prioritize(p, r))
+        let Some(highest_priority_pkg) =
+            state.partial_solution.pick_highest_priority_pkg(|p, r| {
+                dependency_provider.prioritize(&state.package_store[p], r)
+            })
         else {
-            return Ok(state.partial_solution.extract_solution());
+            return Ok(state
+                .partial_solution
+                .extract_solution()
+                .map(|(p, v)| (state.package_store[p].clone(), v))
+                .collect());
         };
         next = highest_priority_pkg;
 
         let term_intersection = state
             .partial_solution
-            .term_intersection_for_package(&next)
+            .term_intersection_for_package(next)
             .ok_or_else(|| {
                 PubGrubError::Failure("a package was chosen but we don't have a term.".into())
             })?;
         let decision = dependency_provider
-            .choose_version(&next, term_intersection.unwrap_positive())
+            .choose_version(
+                &state.package_store[next],
+                term_intersection.unwrap_positive(),
+            )
             .map_err(PubGrubError::ErrorChoosingPackageVersion)?;
         info!("DP chose: {} @ {:?}", next, decision);
 
@@ -145,14 +154,14 @@ pub fn resolve<P: Package, VS: VersionSet>(
 
         if is_new_dependency {
             // Retrieve that package dependencies.
-            let p = &next;
-            let dependencies = dependency_provider.get_dependencies(p, &v).map_err(|err| {
-                PubGrubError::ErrorRetrievingDependencies {
-                    package: p.clone(),
+            let p = next;
+            let dependencies = dependency_provider
+                .get_dependencies(&state.package_store[p], &v)
+                .map_err(|err| PubGrubError::ErrorRetrievingDependencies {
+                    package: state.package_store[p].clone(),
                     version: v.clone(),
                     source: err,
-                }
-            })?;
+                })?;
 
             let known_dependencies = match dependencies {
                 Dependencies::Unknown => {
@@ -162,9 +171,9 @@ pub fn resolve<P: Package, VS: VersionSet>(
                     ));
                     continue;
                 }
-                Dependencies::Known(x) if x.contains_key(p) => {
+                Dependencies::Known(x) if x.contains_key(&state.package_store[p]) => {
                     return Err(PubGrubError::SelfDependency {
-                        package: p.clone(),
+                        package: state.package_store[p].clone(),
                         version: v,
                     });
                 }
