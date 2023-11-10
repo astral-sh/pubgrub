@@ -6,17 +6,23 @@ use pubgrub::report::{DefaultStringReporter, Reporter};
 use pubgrub::solver::{resolve, OfflineDependencyProvider};
 use pubgrub::version::SemanticVersion;
 
+type SemVS = Range<SemanticVersion>;
+
 fn main() {
-    let mut dependency_provider = OfflineDependencyProvider::<&str, SemanticVersion>::new();
+    let mut dependency_provider = OfflineDependencyProvider::<&str, SemVS>::new();
     // Define the root package with a dependency
-    dependency_provider.add_dependencies("root", (0, 0, 0), vec![("foo", Range::exact((1, 0, 0)))]);
+    dependency_provider.add_dependencies(
+        "root",
+        (0, 0, 0),
+        vec![("foo", Range::singleton((1, 0, 0)))],
+    );
 
     dependency_provider.add_dependencies(
         "foo",
         (1, 0, 0),
         vec![
-            ("bar", Range::exact((1, 0, 0))),
-            ("bar", Range::exact((2, 0, 0))),
+            ("bar", Range::singleton((1, 0, 0))),
+            ("bar", Range::singleton((2, 0, 0))),
         ],
     );
 
@@ -30,7 +36,7 @@ fn main() {
         (1, 0, 0),
         vec![(
             "bar",
-            Range::exact((1, 0, 0)).intersection(&Range::exact((2, 0, 0))),
+            Range::singleton((1, 0, 0)).intersection(&Range::singleton((2, 0, 0))),
         )],
     );
 

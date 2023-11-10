@@ -6,15 +6,17 @@ use pubgrub::report::{DefaultStringReporter, Reporter};
 use pubgrub::solver::{resolve, OfflineDependencyProvider};
 use pubgrub::version::SemanticVersion;
 
+type SemVS = Range<SemanticVersion>;
+
 fn main() {
-    let mut dependency_provider = OfflineDependencyProvider::<&str, SemanticVersion>::new();
+    let mut dependency_provider = OfflineDependencyProvider::<&str, SemVS>::new();
     // Define the root package with a dependency on foo and bar
     dependency_provider.add_dependencies(
         "root",
         (0, 0, 0),
         vec![
-            ("foo", Range::exact((1, 0, 0))),
-            ("bar", Range::exact((1, 0, 0))),
+            ("foo", Range::singleton((1, 0, 0))),
+            ("bar", Range::singleton((1, 0, 0))),
         ],
     );
 
@@ -22,14 +24,14 @@ fn main() {
     dependency_provider.add_dependencies(
         "foo",
         (1, 0, 0),
-        vec![("foobar", Range::exact((1, 0, 0)))],
+        vec![("foobar", Range::singleton((1, 0, 0)))],
     );
 
     // bar depends on the conflicting foobar 2.0
     dependency_provider.add_dependencies(
         "bar",
         (1, 0, 0),
-        vec![("foobar", Range::exact((2, 0, 0)))],
+        vec![("foobar", Range::singleton((2, 0, 0)))],
     );
 
     // provide both versions of foobar

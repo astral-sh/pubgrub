@@ -6,8 +6,10 @@ use pubgrub::report::{DefaultStringReporter, Reporter};
 use pubgrub::solver::{resolve, OfflineDependencyProvider};
 use pubgrub::version::SemanticVersion;
 
+type SemVS = Range<SemanticVersion>;
+
 fn main() {
-    let mut dependency_provider = OfflineDependencyProvider::<&str, SemanticVersion>::new();
+    let mut dependency_provider = OfflineDependencyProvider::<&str, SemVS>::new();
     // Define the root package with a dependency on foo between 1.0 and 2.0
     dependency_provider.add_dependencies(
         "root",
@@ -16,7 +18,7 @@ fn main() {
     );
 
     // provide foo 1.1 with a satisfiable set
-    dependency_provider.add_dependencies("foo", (1, 1, 0), vec![("bar", Range::exact((2, 0, 0)))]);
+    dependency_provider.add_dependencies("foo", (1, 1, 0), vec![("bar", Range::empty())]);
 
     // Provide foo 1.2 with unsatisfiable set of direct dependencies
     dependency_provider.add_dependencies(
@@ -24,7 +26,7 @@ fn main() {
         (1, 2, 0),
         vec![(
             "bar",
-            Range::exact((1, 0, 0)).intersection(&Range::exact((2, 0, 0))),
+            Range::singleton((1, 0, 0)).intersection(&Range::singleton((2, 0, 0))),
         )],
     );
 

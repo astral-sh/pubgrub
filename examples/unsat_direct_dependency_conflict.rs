@@ -6,15 +6,17 @@ use pubgrub::report::{DefaultStringReporter, Reporter};
 use pubgrub::solver::{resolve, OfflineDependencyProvider};
 use pubgrub::version::SemanticVersion;
 
+type SemVS = Range<SemanticVersion>;
+
 fn main() {
-    let mut dependency_provider = OfflineDependencyProvider::<&str, SemanticVersion>::new();
+    let mut dependency_provider = OfflineDependencyProvider::<&str, SemVS>::new();
     // Define the root package with incompatible versions for a single dependency
     dependency_provider.add_dependencies(
         "root",
         (0, 0, 0),
         vec![
-            ("foo", Range::exact((1, 0, 0))),
-            ("foo", Range::exact((2, 0, 0))),
+            ("foo", Range::singleton((1, 0, 0))),
+            ("foo", Range::singleton((2, 0, 0))),
         ],
     );
 
@@ -35,13 +37,13 @@ fn main() {
         (0, 0, 0),
         vec![(
             "foo",
-            Range::exact((1, 0, 0)).intersection(&Range::exact((2, 0, 0))),
+            Range::singleton((1, 0, 0)).intersection(&Range::singleton((2, 0, 0))),
         )],
     );
 
     match resolve(&dependency_provider, "root", (0, 0, 0)) {
         Ok(sol) => println!("{:?}", sol),
-        Err(PubGrubError::NoSolution(mut derivation_tree)) => {
+        Err(PubGrubError::NoSolution(derivation_tree)) => {
             eprintln!("No solution.\n");
             eprintln!("{}", DefaultStringReporter::report(&derivation_tree));
             std::process::exit(1);
