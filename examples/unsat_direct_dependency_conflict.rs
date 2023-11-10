@@ -43,17 +43,7 @@ fn main() {
         Ok(sol) => println!("{:?}", sol),
         Err(PubGrubError::NoSolution(mut derivation_tree)) => {
             eprintln!("No solution.\n");
-
-            eprintln!("### Default report:");
-            eprintln!("```");
             eprintln!("{}", DefaultStringReporter::report(&derivation_tree));
-            eprintln!("```\n");
-
-            derivation_tree.collapse_no_versions();
-            eprintln!("### Report with `collapse_no_versions`:");
-            eprintln!("```");
-            eprintln!("{}", DefaultStringReporter::report(&derivation_tree));
-            eprintln!("```");
             std::process::exit(1);
         }
         Err(err) => panic!("{:?}", err),
