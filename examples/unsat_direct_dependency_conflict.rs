@@ -22,7 +22,23 @@ fn main() {
     dependency_provider.add_dependencies("foo", (1, 0, 0), vec![]);
     dependency_provider.add_dependencies("foo", (2, 0, 0), vec![]);
 
-    // Run the algorithm
+    // Run the algorithm — this suceeds because the second requirement of `foo` overrides the first
+    match resolve(&dependency_provider, "root", (0, 0, 0)) {
+        Ok(sol) => println!("{:?}", sol),
+        _ => panic!("Expected success"),
+    };
+
+    // In practice, a user must create an intersection for each repeated package since the resolver only allows one version per package
+    // this results in an empty set of supported versions
+    dependency_provider.add_dependencies(
+        "root",
+        (0, 0, 0),
+        vec![(
+            "foo",
+            Range::exact((1, 0, 0)).intersection(&Range::exact((2, 0, 0))),
+        )],
+    );
+
     match resolve(&dependency_provider, "root", (0, 0, 0)) {
         Ok(sol) => println!("{:?}", sol),
         Err(PubGrubError::NoSolution(mut derivation_tree)) => {
