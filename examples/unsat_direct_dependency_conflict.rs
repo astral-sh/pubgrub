@@ -22,13 +22,18 @@ fn main() {
     match resolve(&dependency_provider, "root", (0, 0, 0)) {
         Ok(sol) => println!("{:?}", sol),
         Err(PubGrubError::NoSolution(mut derivation_tree)) => {
-            eprintln!("No solution.");
-            eprintln!("\nReport with no versions:");
-            eprintln!("{}", DefaultStringReporter::report(&derivation_tree));
+            eprintln!("No solution.\n");
 
-            eprintln!("\nReport with collapse no versions:");
-            derivation_tree.collapse_no_versions();
+            eprintln!("### Default report:");
+            eprintln!("```");
             eprintln!("{}", DefaultStringReporter::report(&derivation_tree));
+            eprintln!("```\n");
+
+            derivation_tree.collapse_no_versions();
+            eprintln!("### Report with `collapse_no_versions`:");
+            eprintln!("```");
+            eprintln!("{}", DefaultStringReporter::report(&derivation_tree));
+            eprintln!("```");
             std::process::exit(1);
         }
         Err(err) => panic!("{:?}", err),
