@@ -24,6 +24,16 @@ fn main() {
     dependency_provider.add_dependencies("bar", (1, 0, 0), vec![]);
     dependency_provider.add_dependencies("bar", (2, 0, 0), vec![]);
 
+    // in practice, foo must be collapsed by the user
+    dependency_provider.add_dependencies(
+        "foo",
+        (1, 0, 0),
+        vec![(
+            "bar",
+            Range::exact((1, 0, 0)).intersection(&Range::exact((2, 0, 0))),
+        )],
+    );
+
     // Run the algorithm
     match resolve(&dependency_provider, "root", (0, 0, 0)) {
         Ok(sol) => println!("{:?}", sol),
