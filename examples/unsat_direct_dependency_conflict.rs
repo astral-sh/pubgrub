@@ -18,6 +18,10 @@ fn main() {
         ],
     );
 
+    // Provide the needed versions of foo
+    dependency_provider.add_dependencies("foo", (1, 0, 0), vec![]);
+    dependency_provider.add_dependencies("foo", (2, 0, 0), vec![]);
+
     // Run the algorithm
     match resolve(&dependency_provider, "root", (0, 0, 0)) {
         Ok(sol) => println!("{:?}", sol),

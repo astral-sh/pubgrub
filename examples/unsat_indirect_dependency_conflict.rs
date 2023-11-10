@@ -20,6 +20,10 @@ fn main() {
         ],
     );
 
+    // provide both versions of bar
+    dependency_provider.add_dependencies("bar", (1, 0, 0), vec![]);
+    dependency_provider.add_dependencies("bar", (2, 0, 0), vec![]);
+
     // Run the algorithm
     match resolve(&dependency_provider, "root", (0, 0, 0)) {
         Ok(sol) => println!("{:?}", sol),

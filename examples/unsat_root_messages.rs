@@ -8,16 +8,8 @@ use pubgrub::version::SemanticVersion;
 
 fn main() {
     let mut dependency_provider = OfflineDependencyProvider::<&str, SemanticVersion>::new();
-    // Define the root package with an incompatibility so we get an unsat message
-    // The incompatibility itself doesn't matter
-    dependency_provider.add_dependencies(
-        "root",
-        (0, 0, 0),
-        vec![
-            ("foo", Range::exact((1, 0, 0))),
-            ("foo", Range::exact((2, 0, 0))),
-        ],
-    );
+    // Define the root package with a dependency on a package we do not provide
+    dependency_provider.add_dependencies("root", (0, 0, 0), vec![("foo", Range::exact((1, 0, 0)))]);
 
     // Run the algorithm
     match resolve(&dependency_provider, "root", (0, 0, 0)) {
