@@ -121,6 +121,9 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> DerivationTree
             //
             // Cannot be merged because the reason may not match
             DerivationTree::External(External::NoVersions(_, _)) => None,
+            DerivationTree::External(External::Custom(_, r, reason)) => Some(
+                DerivationTree::External(External::Custom(package, set.union(&r), reason)),
+            ),
             DerivationTree::External(External::FromDependencyOf(p1, r1, p2, r2)) => {
                 if p1 == package {
                     Some(DerivationTree::External(External::FromDependencyOf(
@@ -138,8 +141,6 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> DerivationTree
                     )))
                 }
             }
-            // Cannot be merged because the reason may not match
-            DerivationTree::External(External::Custom(_, _, _)) => None,
         }
     }
 }
@@ -159,18 +160,14 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> fmt::Display
                     write!(f, "there is no version of {} in {}", package, set)
                 }
             }
-            Self::Custom(package, set, metadata) => {
+            Self::Custom(package, set, reason) => {
                 if set == &VS::full() {
-                    write!(
-                        f,
-                        "dependencies of {} are unavailable {}",
-                        package, metadata
-                    )
+                    write!(f, "dependencies of {} are unusable: {reason}", package)
                 } else {
                     write!(
                         f,
-                        "dependencies of {} at version {} are unavailable {}",
-                        package, set, metadata
+                        "dependencies of {} at version {} are unusable: {reason}",
+                        package, set
                     )
                 }
             }
