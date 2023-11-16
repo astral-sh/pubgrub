@@ -25,7 +25,7 @@ pub struct State<P: Package, VS: VersionSet, Priority: Ord + Clone> {
     root_package: P,
     root_version: VS::V,
 
-    /// All incompatibilities indexed by package.
+    /// The set of incompatibilities for each package.
     pub incompatibilities: Map<P, Vec<IncompId<P, VS>>>,
 
     /// Store the ids of incompatibilities that are already contradicted.
