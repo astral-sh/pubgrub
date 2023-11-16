@@ -34,7 +34,7 @@ jobs:
       - name: Create and push the new tag
         run: |
           TAG="perma-$((LAST_PERMA_NUMBER + 1))"
-          git tag -a "$TAG" -m "Automatically created on push to `main`"
+          git tag -a "$TAG" -m 'Automatically created on push to `main`'
           git push origin "$TAG"
         env:
           LAST_PERMA_NUMBER: ${{ steps.get_version.outputs.LAST_PERMA_NUMBER }}
