@@ -34,12 +34,14 @@ use crate::version_set::VersionSet;
 #[derive(Debug, Clone)]
 pub struct Incompatibility<P: Package, VS: VersionSet> {
     package_terms: SmallMap<P, Term<VS>>,
+    /// The reason why this version or combination of versions can't be selected.
     pub kind: Kind<P, VS>,
 }
 
 /// Type alias of unique identifiers for incompatibilities.
 pub type IncompId<P, VS> = Id<Incompatibility<P, VS>>;
 
+/// The reason why a version or combination of versions can't be selected.
 #[derive(Debug, Clone)]
 pub enum Kind<P: Package, VS: VersionSet> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
@@ -48,6 +50,8 @@ pub enum Kind<P: Package, VS: VersionSet> {
     NoVersions(P, VS),
     /// Dependencies of the package are unavailable for versions in that range.
     UnavailableDependencies(P, VS),
+    /// Dependencies of the package are unusable for versions in that range.
+    UnusableDependencies(P, VS, Option<String>),
     /// Incompatibility coming from the dependencies of a given package.
     FromDependencyOf(P, VS, P, VS),
     /// Derived from two causes. Stores cause ids.
@@ -107,6 +111,17 @@ impl<P: Package, VS: VersionSet> Incompatibility<P, VS> {
         }
     }
 
+    /// Create an incompatibility to remember
+    /// that a package version is not selectable
+    /// because its dependencies are not usable.
+    pub fn unusable_dependencies(package: P, version: VS::V, reason: Option<String>) -> Self {
+        let set = VS::singleton(version);
+        Self {
+            package_terms: SmallMap::One([(package.clone(), Term::Positive(set.clone()))]),
+            kind: Kind::UnusableDependencies(package, set, reason),
+        }
+    }
+
     /// Build an incompatibility from a given dependency.
     pub fn from_dependency(package: P, versions: VS, dep: (&P, &VS)) -> Self {
         let (p2, set2) = dep;
@@ -123,6 +138,7 @@ impl<P: Package, VS: VersionSet> Incompatibility<P, VS> {
         }
     }
 
+    /// The two packages causing the incompatibility, if it was derived from dependencies.
     pub fn as_dependency(&self) -> Option<(&P, &P)> {
         match &self.kind {
             Kind::FromDependencyOf(p1, _, p2, _) => Some((p1, p2)),
@@ -254,6 +270,9 @@ impl<P: Package, VS: VersionSet> Incompatibility<P, VS> {
             }
             Kind::UnavailableDependencies(package, set) => {
                 DerivationTree::External(External::UnavailableDependencies(package, set))
+            }
+            Kind::UnusableDependencies(package, set, reason) => {
+                DerivationTree::External(External::UnusableDependencies(package, set, reason))
             }
             Kind::FromDependencyOf(package, set, dep_package, dep_set) => DerivationTree::External(
                 External::FromDependencyOf(package, set, dep_package, dep_set),
