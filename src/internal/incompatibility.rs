@@ -34,14 +34,14 @@ use crate::version_set::VersionSet;
 #[derive(Debug, Clone)]
 pub struct Incompatibility<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     package_terms: SmallMap<P, Term<VS>>,
-    /// The reason for the incompatibility.
+    /// The reason why this version or combination of versions can't be selected.
     pub kind: Kind<P, VS, M>,
 }
 
 /// Type alias of unique identifiers for incompatibilities.
 pub type IncompId<P, VS, M> = Id<Incompatibility<P, VS, M>>;
 
-/// The reason for the incompatibility.
+/// The reason why a version or combination of versions can't be selected.
 #[derive(Debug, Clone)]
 pub enum Kind<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
@@ -138,6 +138,17 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         }
     }
 
+    /// Create an incompatibility to remember
+    /// that a package version is not selectable
+    /// because its dependencies are not usable.
+    pub fn unusable_dependencies(package: P, version: VS::V, reason: M) -> Self {
+        let set = VS::singleton(version);
+        Self {
+            package_terms: SmallMap::One([(package.clone(), Term::Positive(set.clone()))]),
+            kind: Kind::Custom(package, set, reason),
+        }
+    }
+
     /// Build an incompatibility from a given dependency.
     pub fn from_dependency(package: P, versions: VS, dep: (&P, &VS)) -> Self {
         let (p2, set2) = dep;
@@ -154,8 +165,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         }
     }
 
-    /// Return the two packages where this incompatibility when the incompatibility was created
-    /// through a dependency edge between the two.
+    /// The two packages causing the incompatibility, if it was derived from dependencies.
     pub fn as_dependency(&self) -> Option<(&P, &P)> {
         match &self.kind {
             Kind::FromDependencyOf(p1, _, p2, _) => Some((p1, p2)),
@@ -296,11 +306,9 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                     dep_set.clone(),
                 ))
             }
-            Kind::Custom(package, set, metadata) => DerivationTree::External(External::Custom(
-                package.clone(),
-                set.clone(),
-                metadata.clone(),
-            )),
+            Kind::Custom(package, set, reason) => {
+                DerivationTree::External(External::Custom(package, set, reason))
+            }
         }
     }
 }
