@@ -14,6 +14,7 @@ use crate::internal::partial_solution::SatisfierSearch::{
 use crate::internal::partial_solution::{DecisionLevel, PartialSolution};
 use crate::internal::small_vec::SmallVec;
 use crate::package::Package;
+use crate::package_set::PackageSet;
 use crate::report::DerivationTree;
 use crate::type_aliases::{DependencyConstraints, Map};
 use crate::version_set::VersionSet;
@@ -248,7 +249,10 @@ impl<P: Package, VS: VersionSet, Priority: Ord + Clone> State<P, VS, Priority> {
 
     // Error reporting #########################################################
 
-    fn build_derivation_tree(&self, incompat: IncompId<P, VS>) -> DerivationTree<P, VS> {
+    fn build_derivation_tree(
+        &self,
+        incompat: IncompId<P, VS>,
+    ) -> DerivationTree<dyn PackageSet<P = P, VS = VS>> {
         let shared_ids = self.find_shared_ids(incompat);
         Incompatibility::build_derivation_tree(incompat, &shared_ids, &self.incompatibility_store)
     }

@@ -5,6 +5,7 @@
 use thiserror::Error;
 
 use crate::package::Package;
+use crate::package_set::PackageSet;
 use crate::report::DerivationTree;
 use crate::version_set::VersionSet;
 
@@ -13,7 +14,7 @@ use crate::version_set::VersionSet;
 pub enum PubGrubError<P: Package, VS: VersionSet> {
     /// There is no solution for this set of dependencies.
     #[error("No solution")]
-    NoSolution(DerivationTree<P, VS>),
+    NoSolution(DerivationTree<dyn PackageSet<P = P, VS = VS>>),
 
     /// Error arising when the implementer of
     /// [DependencyProvider](crate::solver::DependencyProvider)

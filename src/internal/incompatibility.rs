@@ -9,6 +9,7 @@ use std::fmt;
 use crate::internal::arena::{Arena, Id};
 use crate::internal::small_map::SmallMap;
 use crate::package::Package;
+use crate::package_set::{DefaultPackageSet, PackageSet};
 use crate::report::{DefaultStringReporter, DerivationTree, Derived, External};
 use crate::term::{self, Term};
 use crate::version_set::VersionSet;
@@ -197,7 +198,7 @@ impl<P: Package, VS: VersionSet> Incompatibility<P, VS> {
         self_id: Id<Self>,
         shared_ids: &Set<Id<Self>>,
         store: &Arena<Self>,
-    ) -> DerivationTree<P, VS> {
+    ) -> DerivationTree<dyn PackageSet<P = P, VS = VS>> {
         match &store[self_id].kind {
             Kind::DerivedFrom(id1, id2) => {
                 let cause1 = Self::build_derivation_tree(*id1, shared_ids, store);
@@ -210,24 +211,28 @@ impl<P: Package, VS: VersionSet> Incompatibility<P, VS> {
                 };
                 DerivationTree::Derived(derived)
             }
-            Kind::NotRoot(package, version) => {
-                DerivationTree::External(External::NotRoot(package.clone(), version.clone()))
-            }
-            Kind::NoVersions(package, set) => {
-                DerivationTree::External(External::NoVersions(package.clone(), set.clone()))
-            }
-            Kind::UnavailableDependencies(package, set) => DerivationTree::External(
-                External::UnavailableDependencies(package.clone(), set.clone()),
-            ),
-            Kind::UnusableDependencies(package, set, reason) => DerivationTree::External(
-                External::UnusableDependencies(package.clone(), set.clone(), reason.clone()),
-            ),
-            Kind::FromDependencyOf(package, set, dep_package, dep_set) => {
-                DerivationTree::External(External::FromDependencyOf(
+            Kind::NotRoot(package, version) => DerivationTree::External(External::NotRoot(
+                DefaultPackageSet::new(package.clone(), version.clone()),
+            )),
+            Kind::NoVersions(package, set) => DerivationTree::External(External::NoVersions(
+                DefaultPackageSet::new(package.clone(), set.clone()),
+            )),
+            Kind::UnavailableDependencies(package, set) => {
+                DerivationTree::External(External::UnavailableDependencies(DefaultPackageSet::new(
                     package.clone(),
                     set.clone(),
-                    dep_package.clone(),
-                    dep_set.clone(),
+                )))
+            }
+            Kind::UnusableDependencies(package, set, reason) => {
+                DerivationTree::External(External::UnusableDependencies(
+                    DefaultPackageSet::new(package.clone(), set.clone()),
+                    reason.clone(),
+                ))
+            }
+            Kind::FromDependencyOf(package, set, dep_package, dep_set) => {
+                DerivationTree::External(External::FromDependencyOf(
+                    DefaultPackageSet::new(package.clone(), set.clone()),
+                    DefaultPackageSet::new(dep_package.clone(), dep_set.clone()),
                 ))
             }
         }

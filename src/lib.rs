@@ -221,6 +221,7 @@
 
 pub mod error;
 pub mod package;
+pub mod package_set;
 pub mod range;
 pub mod report;
 pub mod solver;
