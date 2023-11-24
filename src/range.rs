@@ -239,7 +239,7 @@ impl<V: Ord> Range<V> {
             Excluded(v) => Excluded(v.clone().into()),
             Unbounded => Unbounded,
         };
-        if valid_segment(&start, &end) {
+        if valid_segment(&start.as_ref(), &end.as_ref()) {
             Self {
                 segments: SmallVec::one((start, end)),
             }
@@ -261,14 +261,14 @@ impl<V: Ord> Range<V> {
                 }
             }
             for (s, e) in self.segments.iter() {
-                assert!(valid_segment(s, e));
+                assert!(valid_segment(&s.as_ref(), &e.as_ref()));
             }
         }
         self
     }
 }
 
-fn valid_segment<T: PartialOrd>(start: &Bound<T>, end: &Bound<T>) -> bool {
+fn valid_segment<T: PartialOrd>(start: &Bound<&T>, end: &Bound<&T>) -> bool {
     match (start, end) {
         (Included(s), Included(e)) => s <= e,
         (Included(s), Excluded(e)) => s < e,
@@ -304,8 +304,7 @@ impl<V: Ord + Clone> Range<V> {
                 (Included(i), Excluded(e)) | (Excluded(e), Included(i)) if e < i => Included(i),
                 (s, Unbounded) | (Unbounded, s) => s.as_ref(),
                 _ => unreachable!(),
-            }
-            .cloned();
+            };
             let end = match (left_end, right_end) {
                 (Included(l), Included(r)) => Included(std::cmp::min(l, r)),
                 (Excluded(l), Excluded(r)) => Excluded(std::cmp::min(l, r)),
@@ -314,12 +313,11 @@ impl<V: Ord + Clone> Range<V> {
                 (Included(i), Excluded(e)) | (Excluded(e), Included(i)) if e > i => Included(i),
                 (s, Unbounded) | (Unbounded, s) => s.as_ref(),
                 _ => unreachable!(),
-            }
-            .cloned();
-            left_iter.next_if(|(_, e)| e == &end);
-            right_iter.next_if(|(_, e)| e == &end);
+            };
+            left_iter.next_if(|(_, e)| e.as_ref() == end);
+            right_iter.next_if(|(_, e)| e.as_ref() == end);
             if valid_segment(&start, &end) {
-                segments.push((start, end))
+                segments.push((start.cloned(), end.cloned()))
             }
         }
 
