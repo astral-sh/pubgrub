@@ -55,6 +55,7 @@ use std::ops::RangeBounds;
 use std::{
     fmt::{Debug, Display, Formatter},
     ops::Bound::{self, Excluded, Included, Unbounded},
+    ptr,
 };
 
 /// A Range represents multiple intervals of a continuous range of monotone increasing
@@ -314,8 +315,15 @@ impl<V: Ord + Clone> Range<V> {
                 (s, Unbounded) | (Unbounded, s) => s.as_ref(),
                 _ => unreachable!(),
             };
-            left_iter.next_if(|(_, e)| e.as_ref() == end);
-            right_iter.next_if(|(_, e)| e.as_ref() == end);
+            // We know the identities, so we don't have to go into `V::eq`
+            let bound_ptr_eq = |a, b| match (a, b) {
+                (Included(x), Included(y)) => ptr::eq(x as *const _, y as *const _),
+                (Excluded(x), Excluded(y)) => ptr::eq(x as *const _, y as *const _),
+                (Unbounded, Unbounded) => true,
+                _ => false,
+            };
+            left_iter.next_if(|(_, e)| bound_ptr_eq(e.as_ref(), end));
+            right_iter.next_if(|(_, e)| bound_ptr_eq(e.as_ref(), end));
             if valid_segment(&start, &end) {
                 segments.push((start.cloned(), end.cloned()))
             }
