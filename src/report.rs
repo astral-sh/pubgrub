@@ -567,7 +567,7 @@ impl<P: Package, VS: VersionSet> Reporter<P, VS> for DefaultStringReporter {
     type Output = String;
 
     fn report(derivation_tree: &DerivationTree<P, VS>) -> Self::Output {
-        let formatter = DefaultStringReportFormatter::default();
+        let formatter = DefaultStringReportFormatter;
         match derivation_tree {
             DerivationTree::External(external) => formatter.format_external(external),
             DerivationTree::Derived(derived) => {
@@ -583,7 +583,7 @@ impl<P: Package, VS: VersionSet> Reporter<P, VS> for DefaultStringReporter {
         formatter: &impl ReportFormatter<P, VS, Output = Self::Output>,
     ) -> Self::Output {
         match derivation_tree {
-            DerivationTree::External(external) => formatter.format_external(&external),
+            DerivationTree::External(external) => formatter.format_external(external),
             DerivationTree::Derived(derived) => {
                 let mut reporter = Self::new();
                 reporter.build_recursive(derived, formatter);
