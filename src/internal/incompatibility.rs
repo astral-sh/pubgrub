@@ -34,14 +34,16 @@ use crate::version_set::VersionSet;
 #[derive(Debug, Clone)]
 pub struct Incompatibility<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     package_terms: SmallMap<P, Term<VS>>,
-    kind: Kind<P, VS, M>,
+    /// The reason for the incompatibility.
+    pub kind: Kind<P, VS, M>,
 }
 
 /// Type alias of unique identifiers for incompatibilities.
 pub type IncompId<P, VS, M> = Id<Incompatibility<P, VS, M>>;
 
+/// The reason for the incompatibility.
 #[derive(Debug, Clone)]
-enum Kind<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
+pub enum Kind<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
     ///
     /// This incompatibility drives the resolution, it requires that we pick the (virtual) root
@@ -152,6 +154,8 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         }
     }
 
+    /// Return the two packages where this incompatibility when the incompatibility was created
+    /// through a dependency edge between the two.
     pub fn as_dependency(&self) -> Option<(&P, &P)> {
         match &self.kind {
             Kind::FromDependencyOf(p1, _, p2, _) => Some((p1, p2)),
