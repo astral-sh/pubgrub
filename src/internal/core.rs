@@ -25,6 +25,7 @@ pub struct State<DP: DependencyProvider> {
     root_package: DP::P,
     root_version: DP::V,
 
+    /// All incompatibilities indexed by package.
     #[allow(clippy::type_complexity)]
     incompatibilities: Map<DP::P, Vec<IncompDpId<DP>>>,
 
