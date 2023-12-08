@@ -3,9 +3,10 @@
 //! Build a report as clear as possible as to why
 //! dependency solving failed.
 
-use std::collections::HashSet;
 use std::fmt;
 use std::ops::{Deref, DerefMut};
+
+use rustc_hash::FxHashSet;
 
 use crate::package::Package;
 use crate::term::Term;
@@ -74,8 +75,8 @@ pub struct Derived<P: Package, VS: VersionSet> {
 
 impl<P: Package, VS: VersionSet> DerivationTree<P, VS> {
     /// Get all [Package]s referred to in the deriviation tree.
-    pub fn packages(&self) -> HashSet<&P> {
-        let mut packages = HashSet::default();
+    pub fn packages(&self) -> FxHashSet<&P> {
+        let mut packages = FxHashSet::default();
         match self {
             Self::External(external) => match external {
                 External::FromDependencyOf(p, _, p2, _) => {
