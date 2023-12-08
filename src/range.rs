@@ -434,6 +434,7 @@ impl<V: Ord + Clone> Range<V> {
         I: Iterator<Item = &'v V> + 'v,
         V: 'v,
     {
+        // Do not simplify singletons
         if self.is_singleton() {
             return self.clone();
         }
@@ -449,7 +450,13 @@ impl<V: Ord + Clone> Range<V> {
             }
             Some(None)
         });
-        let kept_segments = group_adjacent_locations(version_locations);
+        let mut kept_segments = group_adjacent_locations(version_locations).peekable();
+
+        // Do not return null sets
+        if kept_segments.peek().is_none() {
+            return self.clone();
+        }
+
         self.keep_segments(kept_segments)
     }
 
