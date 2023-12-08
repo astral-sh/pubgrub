@@ -466,6 +466,13 @@ impl<V: Ord + Clone> Range<V> {
         }
         Self { segments }.check_invariants()
     }
+
+    pub fn is_singleton(&self) -> bool {
+        match self.segments.as_slice() {
+            [(Included(v1), Included(v2))] => v1 == v2,
+            _ => false,
+        }
+    }
 }
 
 impl<T: Debug + Display + Clone + Eq + Ord> VersionSet for Range<T> {
