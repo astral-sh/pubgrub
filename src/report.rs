@@ -7,6 +7,8 @@ use std::fmt::{self, Debug, Display};
 use std::ops::Deref;
 use std::sync::Arc;
 
+use rustc_hash::FxHashSet;
+
 use crate::package::Package;
 use crate::term::Term;
 use crate::type_aliases::{Map, Set};
