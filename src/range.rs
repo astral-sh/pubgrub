@@ -434,6 +434,10 @@ impl<V: Ord + Clone> Range<V> {
         I: Iterator<Item = &'v V> + 'v,
         V: 'v,
     {
+        if self.is_singleton() {
+            return self.clone();
+        }
+
         // Return the segment index in the range for each version in the range, None otherwise
         let version_locations = versions.scan(0, move |i, v| {
             while let Some(segment) = self.segments.get(*i) {
