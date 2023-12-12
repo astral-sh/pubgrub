@@ -48,6 +48,8 @@ pub enum External<P: Package, VS: VersionSet> {
     NotRoot(P, VS::V),
     /// There are no versions in the given set for this package.
     NoVersions(P, VS),
+    /// Versions of the package in the given set are unusable.
+    UnusableVersions(P, VS, Option<String>),
     /// Dependencies of the package are unavailable for versions in that set.
     UnavailableDependencies(P, VS),
     /// Dependencies of the package are unusable for versions in that set.
@@ -86,7 +88,8 @@ impl<P: Package, VS: VersionSet> DerivationTree<P, VS> {
                 External::NoVersions(p, _)
                 | External::NotRoot(p, _)
                 | External::UnavailableDependencies(p, _)
-                | External::UnusableDependencies(p, ..) => {
+                | External::UnusableDependencies(p, ..)
+                | External::UnusableVersions(p, ..) => {
                     packages.insert(p);
                 }
             },
@@ -149,8 +152,17 @@ impl<P: Package, VS: VersionSet> DerivationTree<P, VS> {
             DerivationTree::External(External::UnavailableDependencies(_, r)) => Some(
                 DerivationTree::External(External::UnavailableDependencies(package, set.union(&r))),
             ),
+            // TODO(zanieb): Do not merge cases where reasons are different
             DerivationTree::External(External::UnusableDependencies(_, r, reason)) => {
                 Some(DerivationTree::External(External::UnusableDependencies(
+                    package,
+                    set.union(&r),
+                    reason,
+                )))
+            }
+            // TODO(zanieb): Do not merge cases where reasons are different
+            DerivationTree::External(External::UnusableVersions(_, r, reason)) => {
+                Some(DerivationTree::External(External::UnusableVersions(
                     package,
                     set.union(&r),
                     reason,
@@ -199,6 +211,22 @@ impl<P: Package, VS: VersionSet> fmt::Display for External<P, VS> {
                         "dependencies of {} at version {} are unavailable",
                         package, set
                     )
+                }
+            }
+
+            Self::UnusableVersions(package, set, reason) => {
+                if let Some(reason) = reason {
+                    if set == &VS::full() {
+                        write!(f, "all versions of {} are unusable: {reason}", package)
+                    } else {
+                        write!(f, "{}{} is unusable: {reason}", package, set)
+                    }
+                } else {
+                    if set == &VS::full() {
+                        write!(f, "all versions of {} are unusable", package)
+                    } else {
+                        write!(f, "{}{} is unusable", package, set)
+                    }
                 }
             }
             Self::UnusableDependencies(package, set, reason) => {

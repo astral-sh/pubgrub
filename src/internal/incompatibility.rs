@@ -45,6 +45,8 @@ pub enum Kind<P: Package, VS: VersionSet> {
     NotRoot(P, VS::V),
     /// There are no versions in the given range for this package.
     NoVersions(P, VS),
+    /// Versions of the package in the given set are unusable.
+    UnusableVersions(P, VS, Option<String>),
     /// Dependencies of the package are unavailable for versions in that range.
     UnavailableDependencies(P, VS),
     /// Dependencies of the package are unusable for versions in that range.
@@ -116,6 +118,17 @@ impl<P: Package, VS: VersionSet> Incompatibility<P, VS> {
         Self {
             package_terms: SmallMap::One([(package.clone(), Term::Positive(set.clone()))]),
             kind: Kind::UnusableDependencies(package, set, reason),
+        }
+    }
+
+    /// Create an incompatibility to remember
+    /// that a package version is not selectable
+    /// because it is unusable.
+    pub fn unusable_version(package: P, version: VS::V, reason: Option<String>) -> Self {
+        let set = VS::singleton(version);
+        Self {
+            package_terms: SmallMap::One([(package.clone(), Term::Positive(set.clone()))]),
+            kind: Kind::UnusableVersions(package, set, reason),
         }
     }
 
@@ -223,6 +236,9 @@ impl<P: Package, VS: VersionSet> Incompatibility<P, VS> {
             ),
             Kind::UnusableDependencies(package, set, reason) => DerivationTree::External(
                 External::UnusableDependencies(package.clone(), set.clone(), reason.clone()),
+            ),
+            Kind::UnusableVersions(package, set, reason) => DerivationTree::External(
+                External::UnusableVersions(package.clone(), set.clone(), reason.clone()),
             ),
             Kind::FromDependencyOf(package, set, dep_package, dep_set) => {
                 DerivationTree::External(External::FromDependencyOf(
