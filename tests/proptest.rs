@@ -598,7 +598,7 @@ fn large_case() {
             let mut sat = SatResolve::new(&dependency_provider);
             for p in dependency_provider.packages() {
                 for v in dependency_provider.versions(p).unwrap() {
-                    let res = resolve(&dependency_provider, p.clone(), v);
+                    let res = resolve(&dependency_provider, *p, v);
                     sat.check_resolve(&res, p, v);
                 }
             }
