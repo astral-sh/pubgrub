@@ -45,7 +45,7 @@ pub enum Kind<P: Package, VS: VersionSet> {
     NotRoot(P, VS::V),
     /// There are no versions in the given range for this package.
     NoVersions(P, VS),
-    /// The package is unavailable for versions in the range.
+    /// The package is unavailable for versions in the range. A string reason is included.
     Unavailable(P, VS, String),
     /// Incompatibility coming from the dependencies of a given package.
     FromDependencyOf(P, VS, P, VS),
