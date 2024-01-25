@@ -138,17 +138,6 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         }
     }
 
-    /// Create an incompatibility to remember
-    /// that a package version is not selectable
-    /// because its dependencies are not usable.
-    pub fn unusable_dependencies(package: P, version: VS::V, reason: M) -> Self {
-        let set = VS::singleton(version);
-        Self {
-            package_terms: SmallMap::One([(package.clone(), Term::Positive(set.clone()))]),
-            kind: Kind::Custom(package, set, reason),
-        }
-    }
-
     /// Build an incompatibility from a given dependency.
     pub fn from_dependency(package: P, versions: VS, dep: (&P, &VS)) -> Self {
         let (p2, set2) = dep;
@@ -383,12 +372,12 @@ pub mod tests {
             let mut store = Arena::new();
             let i1 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([("p1", t1.clone()), ("p2", t2.negate())]),
-                kind: Kind::<_, _, String>::FromDependencyOf("p1", Range::full(), "p2", Range::full())
+                kind: Kind::Custom("0", Range::full(), "foo".to_string())
             });
 
             let i2 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([("p2", t2), ("p3", t3.clone())]),
-                kind: Kind::<_, _, String>::FromDependencyOf("p2", Range::full(), "p3", Range::full())
+                kind: Kind::Custom("0", Range::full(), "bar".to_string())
             });
 
             let mut i3 = Map::default();
