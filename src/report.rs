@@ -47,7 +47,7 @@ pub enum External<P: Package, VS: VersionSet> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
     NotRoot(P, VS::V),
     /// There are no versions in the given set for this package. A string reason is included.
-    NoVersions(P, VS, String),
+    NoVersions(P, VS, Option<String>),
     /// The package is unusable in the given set. A string reason is included.
     Unavailable(P, VS, String),
     /// Incompatibility coming from the dependencies of a given package.

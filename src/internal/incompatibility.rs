@@ -43,8 +43,8 @@ pub type IncompId<P, VS> = Id<Incompatibility<P, VS>>;
 pub enum Kind<P: Package, VS: VersionSet> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
     NotRoot(P, VS::V),
-    /// There are no versions in the given range for this package. A string reason is included.
-    NoVersions(P, VS, String),
+    /// There are no versions in the given range for this package. A string reason may be included.
+    NoVersions(P, VS, Option<String>),
     /// The package is unavailable for versions in the range. A string reason is included.
     Unavailable(P, VS, String),
     /// Incompatibility coming from the dependencies of a given package.
@@ -84,7 +84,7 @@ impl<P: Package, VS: VersionSet> Incompatibility<P, VS> {
 
     /// Create an incompatibility to remember
     /// that a given set does not contain any version.
-    pub fn no_versions(package: P, term: Term<VS>, reason: String) -> Self {
+    pub fn no_versions(package: P, term: Term<VS>, reason: Option<String>) -> Self {
         let set = match &term {
             Term::Positive(r) => r.clone(),
             Term::Negative(_) => panic!("No version should have a positive term"),
