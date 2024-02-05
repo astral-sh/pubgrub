@@ -354,12 +354,10 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> fmt::Display
 
 #[cfg(test)]
 pub mod tests {
-    use proptest::prelude::*;
-
+    use super::*;
     use crate::range::Range;
     use crate::term::tests::strategy as term_strat;
-
-    use super::*;
+    use proptest::prelude::*;
 
     proptest! {
 
