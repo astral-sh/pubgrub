@@ -104,14 +104,14 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     }
 
     /// Create an incompatibility to remember that a given set does not contain any version.
-    pub fn no_versions(package: P, term: Term<VS>) -> Self {
+    pub fn no_versions(package: P, term: Term<VS>, reason: Option<String>) -> Self {
         let set = match &term {
             Term::Positive(r) => r.clone(),
             Term::Negative(_) => panic!("No version should have a positive term"),
         };
         Self {
             package_terms: SmallMap::One([(package.clone(), term)]),
-            kind: Kind::NoVersions(package, set),
+            kind: Kind::NoVersions(package, set, reason),
         }
     }
 

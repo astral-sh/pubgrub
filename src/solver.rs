@@ -120,7 +120,8 @@ pub fn resolve<DP: DependencyProvider>(
         // Pick the next compatible version.
         let v = match decision {
             None => {
-                let inc = Incompatibility::no_versions(next.clone(), term_intersection.clone());
+                let inc =
+                    Incompatibility::no_versions(next.clone(), term_intersection.clone(), None);
                 state.add_incompatibility(inc);
                 continue;
             }
