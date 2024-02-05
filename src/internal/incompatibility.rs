@@ -285,7 +285,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 DerivationTree::External(External::NotRoot(package, version))
             }
             Kind::NoVersions(package, set) => {
-                DerivationTree::External(External::NoVersions(package.clone(), set.clone()))
+                DerivationTree::External(External::NoVersions(package.clone(), set.clone(), None))
             }
             Kind::FromDependencyOf(package, set, dep_package, dep_set) => {
                 DerivationTree::External(External::FromDependencyOf(
