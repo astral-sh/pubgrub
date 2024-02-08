@@ -209,6 +209,21 @@ impl<V: Clone> Range<V> {
 }
 
 impl<V: Ord> Range<V> {
+    /// If the range includes a single version, return it.
+    /// Otherwise, returns [None].
+    pub fn as_singleton(&self) -> Option<&V> {
+        match self.segments.as_slice() {
+            [(Included(v1), Included(v2))] => {
+                if v1 == v2 {
+                    Some(v1)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Convert to something that can be used with
     /// [BTreeMap::range](std::collections::BTreeMap::range).
     /// All versions contained in self, will be in the output,
@@ -471,7 +486,7 @@ impl<V: Ord + Clone> Range<V> {
     {
         // Do not simplify singletons
         if let Some(version) = self.as_singleton() {
-            return Self::singleton(version);
+            return Self::singleton(version.clone());
         }
 
         #[cfg(debug_assertions)]
@@ -526,21 +541,6 @@ impl<V: Ord + Clone> Range<V> {
             ));
         }
         Self { segments }.check_invariants()
-    }
-
-    /// If the range includes a single version, return it.
-    /// Otherwise, returns [None].
-    pub fn as_singleton(&self) -> Option<V> {
-        match self.segments.as_slice() {
-            [(Included(v1), Included(v2))] => {
-                if v1 == v2 {
-                    Some(v1.clone())
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
     }
 
     /// Iterate over the parts of the range.
