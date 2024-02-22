@@ -352,8 +352,8 @@ fn retain_dependencies<N: Package + Ord, VS: VersionSet>(
             smaller_dependency_provider.add_dependencies(
                 n.clone(),
                 v.clone(),
-                deps.iter().filter_map(|(dep, range)| {
-                    if !retain(n, v, dep) {
+                deps.into_iter().filter_map(|(dep, range)| {
+                    if !retain(n, v, &dep) {
                         None
                     } else {
                         Some((dep.clone(), range.clone()))
