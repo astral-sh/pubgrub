@@ -71,7 +71,7 @@ use crate::error::PubGrubError;
 pub use crate::internal::core::State;
 pub use crate::internal::incompatibility::{Incompatibility, Kind};
 use crate::package::Package;
-use crate::type_aliases::{DependencyConstraints, Map, SelectedDependencies};
+use crate::type_aliases::{Map, SelectedDependencies};
 use crate::version_set::VersionSet;
 use log::{debug, info};
 
@@ -159,10 +159,10 @@ pub fn resolve<DP: DependencyProvider>(
                     ));
                     continue;
                 }
-                Dependencies::Available(x) if x.contains_key(p) => {
+                Dependencies::Available(x) if x.clone().into_iter().any(|(d, _)| &d == p) => {
                     return Err(PubGrubError::SelfDependency {
                         package: p.clone(),
-                        version: v,
+                        version: v.clone(),
                     });
                 }
                 Dependencies::Available(x) => x,
@@ -172,12 +172,12 @@ pub fn resolve<DP: DependencyProvider>(
             let dep_incompats = state.add_incompatibility_from_dependencies(
                 p.clone(),
                 v.clone(),
-                &known_dependencies,
+                known_dependencies,
             );
 
             state.partial_solution.add_version(
                 p.clone(),
-                v,
+                v.clone(),
                 dep_incompats,
                 &state.incompatibility_store,
             );
@@ -193,11 +193,11 @@ pub fn resolve<DP: DependencyProvider>(
 /// An enum used by [DependencyProvider] that holds information about package dependencies.
 /// For each [Package] there is a set of versions allowed as a dependency.
 #[derive(Clone)]
-pub enum Dependencies<P: Package, VS: VersionSet> {
+pub enum Dependencies<T> {
     /// Package dependencies are unavailable.
     Unavailable,
     /// Container for all available package versions.
-    Available(DependencyConstraints<P, VS>),
+    Available(T),
 }
 
 /// Trait that allows the algorithm to retrieve available packages and their dependencies.
@@ -267,7 +267,7 @@ pub trait DependencyProvider {
         &self,
         package: &Self::P,
         version: &Self::V,
-    ) -> Result<Dependencies<Self::P, Self::VS>, Self::Err>;
+    ) -> Result<Dependencies<impl IntoIterator<Item = (Self::P, Self::VS)> + Clone>, Self::Err>;
 
     /// This is called fairly regularly during the resolution,
     /// if it returns an Err then resolution will be terminated.
@@ -291,7 +291,7 @@ pub trait DependencyProvider {
 )]
 #[cfg_attr(feature = "serde", serde(transparent))]
 pub struct OfflineDependencyProvider<P: Package, VS: VersionSet> {
-    dependencies: Map<P, BTreeMap<VS::V, DependencyConstraints<P, VS>>>,
+    dependencies: Map<P, BTreeMap<VS::V, Map<P, VS>>>,
 }
 
 impl<P: Package, VS: VersionSet> OfflineDependencyProvider<P, VS> {
@@ -341,8 +341,8 @@ impl<P: Package, VS: VersionSet> OfflineDependencyProvider<P, VS> {
 
     /// Lists dependencies of a given package and version.
     /// Returns [None] if no information is available regarding that package and version pair.
-    fn dependencies(&self, package: &P, version: &VS::V) -> Option<DependencyConstraints<P, VS>> {
-        self.dependencies.get(package)?.get(version).cloned()
+    fn dependencies(&self, package: &P, version: &VS::V) -> Option<&Map<P, VS>> {
+        self.dependencies.get(package)?.get(version)
     }
 }
 
@@ -378,11 +378,15 @@ impl<P: Package, VS: VersionSet> DependencyProvider for OfflineDependencyProvide
     fn get_dependencies(
         &self,
         package: &P,
-        version: &VS::V,
-    ) -> Result<Dependencies<P, VS>, Infallible> {
+        version: &<VS as VersionSet>::V,
+    ) -> Result<Dependencies<impl IntoIterator<Item = (P, VS)> + Clone>, Self::Err> {
         Ok(match self.dependencies(package, version) {
             None => Dependencies::Unavailable,
-            Some(dependencies) => Dependencies::Available(dependencies),
+            Some(dependencies) => Dependencies::Available(
+                dependencies
+                    .into_iter()
+                    .map(|(p, vs)| (p.clone(), vs.clone())),
+            ),
         })
     }
 }
