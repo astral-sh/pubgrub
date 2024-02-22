@@ -35,7 +35,11 @@ struct OldestVersionsDependencyProvider<P: Package, VS: VersionSet>(
 impl<P: Package, VS: VersionSet> DependencyProvider<P, VS>
     for OldestVersionsDependencyProvider<P, VS>
 {
-    fn get_dependencies(&self, p: &P, v: &VS::V) -> Result<Dependencies<P, VS>, Infallible> {
+    fn get_dependencies(
+        &self,
+        p: &P,
+        v: &VS::V,
+    ) -> Result<Dependencies<impl IntoIterator<Item = (P, VS)> + Clone>, Infallible> {
         self.0.get_dependencies(p, v)
     }
 
@@ -81,7 +85,11 @@ impl<DP> TimeoutDependencyProvider<DP> {
 impl<P: Package, VS: VersionSet, DP: DependencyProvider<P, VS>> DependencyProvider<P, VS>
     for TimeoutDependencyProvider<DP>
 {
-    fn get_dependencies(&self, p: &P, v: &VS::V) -> Result<Dependencies<P, VS>, DP::Err> {
+    fn get_dependencies(
+        &self,
+        p: &P,
+        v: &VS::V,
+    ) -> Result<Dependencies<impl IntoIterator<Item = (P, VS)> + Clone>, DP::Err> {
         self.dp.get_dependencies(p, v)
     }
 
@@ -339,8 +347,8 @@ fn retain_dependencies<N: Package + Ord, VS: VersionSet>(
             smaller_dependency_provider.add_dependencies(
                 n.clone(),
                 v.clone(),
-                deps.iter().filter_map(|(dep, range)| {
-                    if !retain(n, v, dep) {
+                deps.into_iter().filter_map(|(dep, range)| {
+                    if !retain(n, v, &dep) {
                         None
                     } else {
                         Some((dep.clone(), range.clone()))
