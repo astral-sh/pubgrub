@@ -940,18 +940,6 @@ pub mod tests {
         }
 
         #[test]
-        fn is_disjoint_through_intersection(r1 in strategy(), r2 in strategy()) {
-            let disjoint_def = r1.intersection(&r2) == Range::empty();
-            assert_eq!(r1.is_disjoint(&r2), disjoint_def);
-        }
-
-        #[test]
-        fn subset_of_through_intersection(r1 in strategy(), r2 in strategy()) {
-            let disjoint_def = r1.intersection(&r2) == r1;
-            assert_eq!(r1.subset_of(&r2), disjoint_def);
-        }
-
-        #[test]
         fn union_through_intersection(r1 in strategy(), r2 in strategy()) {
             let union_def = r1
                 .complement()
@@ -1023,6 +1011,27 @@ pub mod tests {
                 assert_eq!(range.contains(&v), simp.contains(&v));
             }
             assert!(simp.segments.len() <= range.segments.len())
+        }
+
+        // Testing is_disjoint --------------------------------
+
+        #[test]
+        fn is_disjoint_through_intersection(r1 in strategy(), r2 in strategy()) {
+            let disjoint_def = r1.intersection(&r2) == Range::empty();
+            assert_eq!(r1.is_disjoint(&r2), disjoint_def);
+        }
+
+        #[test]
+        fn is_disjoint_symmetry(r1 in strategy(), r2 in strategy()) {
+            assert_eq!(r1.is_disjoint(&r2), r2.is_disjoint(&r1));
+        }
+
+        // Testing subset_of --------------------------------
+
+        #[test]
+        fn subset_of_through_intersection(r1 in strategy(), r2 in strategy()) {
+            let disjoint_def = r1.intersection(&r2) == r1;
+            assert_eq!(r1.subset_of(&r2), disjoint_def);
         }
     }
 
