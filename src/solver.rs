@@ -120,8 +120,7 @@ pub fn resolve<DP: DependencyProvider>(
         // Pick the next compatible version.
         let v = match decision {
             None => {
-                let inc =
-                    Incompatibility::no_versions(next.clone(), term_intersection.clone(), None);
+                let inc = Incompatibility::no_versions(next.clone(), term_intersection.clone());
                 state.add_incompatibility(inc);
                 continue;
             }
@@ -193,7 +192,7 @@ pub fn resolve<DP: DependencyProvider>(
 /// An enum used by [DependencyProvider] that holds information about package dependencies.
 /// For each [Package] there is a set of versions allowed as a dependency.
 #[derive(Clone)]
-pub enum Dependencies<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
+pub enum Dependencies<T, M: Eq + Clone + Debug + Display> {
     /// Package dependencies are unavailable with the reason why they are missing.
     Unavailable(M),
     /// Container for all available package versions.
@@ -284,7 +283,10 @@ pub trait DependencyProvider {
         &self,
         package: &Self::P,
         version: &Self::V,
-    ) -> Result<Dependencies<impl IntoIterator<Item = (Self::P, Self::VS)> + Clone, Self::M>, Self::Err>;
+    ) -> Result<
+        Dependencies<impl IntoIterator<Item = (Self::P, Self::VS)> + Clone, Self::M>,
+        Self::Err,
+    >;
 
     /// This is called fairly regularly during the resolution,
     /// if it returns an Err then resolution will be terminated.
