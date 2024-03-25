@@ -96,7 +96,7 @@
 //!         &self,
 //!         package: &String,
 //!         version: &SemanticVersion,
-//!     ) -> Result<Dependencies<impl IntoIterator<Item = (String, SemVS)> + Clone, Self::M>, Infallible> {
+//!     ) -> Result<Dependencies<impl IntoIterator<Item = (Self::P, Self::VS)> + Clone, Self::M>, Infallible> {
 //!         Ok(Dependencies::Available([]))
 //!     }
 //!

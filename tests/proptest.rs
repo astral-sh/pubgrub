@@ -90,7 +90,7 @@ impl<DP: DependencyProvider> DependencyProvider for TimeoutDependencyProvider<DP
         &self,
         p: &DP::P,
         v: &DP::V,
-    ) -> Result<Dependencies<impl IntoIterator<Item = (DP::P, DP::VS)> + Clone, Self::M>, DP::Err>
+    ) -> Result<Dependencies<impl IntoIterator<Item = (DP::P, DP::VS)> + Clone, DP::M>, DP::Err>
     {
         self.dp.get_dependencies(p, v)
     }

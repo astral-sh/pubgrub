@@ -27,7 +27,7 @@ pub struct State<DP: DependencyProvider> {
 
     /// All incompatibilities indexed by package.
     #[allow(clippy::type_complexity)]
-    incompatibilities: Map<DP::P, Vec<IncompDpId<DP>>>,
+    pub incompatibilities: Map<DP::P, Vec<IncompDpId<DP>>>,
 
     /// Store the ids of incompatibilities that are already contradicted.
     /// For each one keep track of the decision level when it was found to be contradicted.
