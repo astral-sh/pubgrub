@@ -71,7 +71,7 @@ impl ReportFormatter<Package, Range<SemanticVersion>, String> for CustomReportFo
             External::NotRoot(package, version) => {
                 format!("we are solving dependencies of {package} {version}")
             }
-            External::NoVersions(package, set, _) => {
+            External::NoVersions(package, set) => {
                 if set == &Range::full() {
                     format!("there is no available version for {package}")
                 } else {
