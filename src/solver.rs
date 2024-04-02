@@ -213,6 +213,9 @@ pub trait DependencyProvider {
     /// The requirements must be able to process the same kind of version as this dependency provider.
     type VS: VersionSet<V = Self::V>;
 
+    /// How this provider stores metadata or additional context about incompatibilities
+    type M: Eq + Clone + Debug + Display;
+
     /// [Decision making](https://github.com/dart-lang/pub/blob/master/doc/solver.md#decision-making)
     /// is the process of choosing the next package
     /// and version that will be appended to the partial solution.
@@ -355,6 +358,7 @@ impl<P: Package, VS: VersionSet> DependencyProvider for OfflineDependencyProvide
     type P = P;
     type V = VS::V;
     type VS = VS;
+    type M = String;
 
     type Err = Infallible;
 
