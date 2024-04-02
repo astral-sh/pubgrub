@@ -44,7 +44,7 @@ pub struct State<DP: DependencyProvider> {
     pub partial_solution: PartialSolution<DP>,
 
     /// The store is the reference storage for all incompatibilities.
-    pub incompatibility_store: Arena<Incompatibility<DP::P, DP::VS>>,
+    pub incompatibility_store: Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
 
     /// This is a stack of work to be done in `unit_propagation`.
     /// It can definitely be a local variable to that method, but
@@ -54,11 +54,12 @@ pub struct State<DP: DependencyProvider> {
 
 impl<DP: DependencyProvider> State<DP> {
     /// Initialization of PubGrub state.
-    pub fn init(root_package: DP::P, root_version: DP::V) -> Self {
+    pub fn init(root_package: DP::P, root_version: DP::V, metadata: DP::M) -> Self {
         let mut incompatibility_store = Arena::new();
         let not_root_id = incompatibility_store.alloc(Incompatibility::not_root(
             root_package.clone(),
             root_version.clone(),
+            metadata.clone(),
         ));
         let mut incompatibilities = Map::default();
         incompatibilities.insert(root_package.clone(), vec![not_root_id]);
@@ -75,7 +76,7 @@ impl<DP: DependencyProvider> State<DP> {
     }
 
     /// Add an incompatibility to the state.
-    pub fn add_incompatibility(&mut self, incompat: Incompatibility<DP::P, DP::VS>) {
+    pub fn add_incompatibility(&mut self, incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
         let id = self.incompatibility_store.alloc(incompat);
         self.merge_incompatibility(id);
     }
@@ -85,6 +86,7 @@ impl<DP: DependencyProvider> State<DP> {
         &mut self,
         package: DP::P,
         version: DP::V,
+        metadata: DP::M,
         deps: impl IntoIterator<Item = (DP::P, DP::VS)>,
     ) -> std::ops::Range<IncompDpId<DP>> {
         // Create incompatibilities and allocate them in the store.
@@ -95,6 +97,7 @@ impl<DP: DependencyProvider> State<DP> {
                         package.clone(),
                         <DP::VS as VersionSet>::singleton(version.clone()),
                         dep,
+                        metadata,
                     )
                 }));
         // Merge the newly created incompatibilities with the older ones.
@@ -298,7 +301,10 @@ impl<DP: DependencyProvider> State<DP> {
 
     // Error reporting #########################################################
 
-    fn build_derivation_tree(&self, incompat: IncompDpId<DP>) -> DerivationTree<DP::P, DP::VS> {
+    fn build_derivation_tree(
+        &self,
+        incompat: IncompDpId<DP>,
+    ) -> DerivationTree<DP::P, DP::VS, DP::M> {
         let mut all_ids: Set<IncompDpId<DP>> = Set::default();
         let mut shared_ids = Set::default();
         let mut stack = vec![incompat];

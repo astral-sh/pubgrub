@@ -3,7 +3,7 @@
 //! Build a report as clear as possible as to why
 //! dependency solving failed.
 
-use std::fmt;
+use std::fmt::{self, Debug, Display};
 use std::ops::Deref;
 use std::sync::Arc;
 
@@ -15,49 +15,49 @@ use crate::type_aliases::Map;
 use crate::version_set::VersionSet;
 
 /// Reporter trait.
-pub trait Reporter<P: Package, VS: VersionSet> {
+pub trait Reporter<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Output type of the report.
     type Output;
 
     /// Generate a report from the derivation tree
     /// describing the resolution failure using the default formatter.
-    fn report(derivation_tree: &DerivationTree<P, VS>) -> Self::Output;
+    fn report(derivation_tree: &DerivationTree<P, VS, M>) -> Self::Output;
 
     /// Generate a report from the derivation tree
     /// describing the resolution failure using a custom formatter.
     fn report_with_formatter(
-        derivation_tree: &DerivationTree<P, VS>,
-        formatter: &impl ReportFormatter<P, VS, Output = Self::Output>,
+        derivation_tree: &DerivationTree<P, VS, M>,
+        formatter: &impl ReportFormatter<P, VS, M, Output = Self::Output>,
     ) -> Self::Output;
 }
 
 /// Derivation tree resulting in the impossibility
 /// to solve the dependencies of our root package.
 #[derive(Debug, Clone)]
-pub enum DerivationTree<P: Package, VS: VersionSet> {
+pub enum DerivationTree<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// External incompatibility.
-    External(External<P, VS>),
+    External(External<P, VS, M>),
     /// Incompatibility derived from two others.
-    Derived(Derived<P, VS>),
+    Derived(Derived<P, VS, M>),
 }
 
 /// Incompatibilities that are not derived from others,
 /// they have their own reason.
 #[derive(Debug, Clone)]
-pub enum External<P: Package, VS: VersionSet> {
+pub enum External<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
-    NotRoot(P, VS::V),
+    NotRoot(P, VS::V, M),
     /// There are no versions in the given set for this package. A string reason is included.
-    NoVersions(P, VS, Option<String>),
+    NoVersions(P, VS, M),
     /// The package is unusable in the given set. A string reason is included.
-    Unavailable(P, VS, String),
+    Unavailable(P, VS, M),
     /// Incompatibility coming from the dependencies of a given package.
-    FromDependencyOf(P, VS, P, VS),
+    FromDependencyOf(P, VS, P, VS, M),
 }
 
 /// Incompatibility derived from two others.
 #[derive(Debug, Clone)]
-pub struct Derived<P: Package, VS: VersionSet> {
+pub struct Derived<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Terms of the incompatibility.
     pub terms: Map<P, Term<VS>>,
     /// Indicate if that incompatibility is present multiple times
@@ -67,23 +67,23 @@ pub struct Derived<P: Package, VS: VersionSet> {
     /// and refer to the explanation for the other times.
     pub shared_id: Option<usize>,
     /// First cause.
-    pub cause1: Arc<DerivationTree<P, VS>>,
+    pub cause1: Arc<DerivationTree<P, VS, M>>,
     /// Second cause.
-    pub cause2: Arc<DerivationTree<P, VS>>,
+    pub cause2: Arc<DerivationTree<P, VS, M>>,
 }
 
-impl<P: Package, VS: VersionSet> DerivationTree<P, VS> {
+impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> DerivationTree<P, VS, M> {
     /// Get all [Package]s referred to in the deriviation tree.
     pub fn packages(&self) -> FxHashSet<&P> {
         let mut packages = FxHashSet::default();
         match self {
             Self::External(external) => match external {
-                External::FromDependencyOf(p, _, p2, _) => {
+                External::FromDependencyOf(p, _, p2, _, _) => {
                     packages.insert(p);
                     packages.insert(p2);
                 }
                 External::NoVersions(p, _, _)
-                | External::NotRoot(p, _)
+                | External::NotRoot(p, _, _)
                 | External::Unavailable(p, ..) => {
                     packages.insert(p);
                 }
@@ -141,7 +141,7 @@ impl<P: Package, VS: VersionSet> DerivationTree<P, VS> {
             // TODO: take care of the Derived case.
             // Once done, we can remove the Option.
             DerivationTree::Derived(_) => Some(self),
-            DerivationTree::External(External::NotRoot(_, _)) => {
+            DerivationTree::External(External::NotRoot(_, _, _)) => {
                 panic!("How did we end up with a NoVersions merged with a NotRoot?")
             }
             //
@@ -149,13 +149,14 @@ impl<P: Package, VS: VersionSet> DerivationTree<P, VS> {
             DerivationTree::External(External::NoVersions(_, _, _)) => None,
             // Cannot be merged because the reason may not match
             DerivationTree::External(External::Unavailable(_, _, _)) => None,
-            DerivationTree::External(External::FromDependencyOf(p1, r1, p2, r2)) => {
+            DerivationTree::External(External::FromDependencyOf(p1, r1, p2, r2, m)) => {
                 if p1 == package {
                     Some(DerivationTree::External(External::FromDependencyOf(
                         p1,
                         r1.union(&set),
                         p2,
                         r2,
+                        m,
                     )))
                 } else {
                     Some(DerivationTree::External(External::FromDependencyOf(
@@ -163,6 +164,7 @@ impl<P: Package, VS: VersionSet> DerivationTree<P, VS> {
                         r1,
                         p2,
                         r2.union(&set),
+                        m,
                     )))
                 }
             }
@@ -170,35 +172,37 @@ impl<P: Package, VS: VersionSet> DerivationTree<P, VS> {
     }
 }
 
-impl<P: Package, VS: VersionSet> fmt::Display for External<P, VS> {
+impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> fmt::Display
+    for External<P, VS, M>
+{
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotRoot(package, version) => {
+            Self::NotRoot(package, version, _metadata) => {
                 write!(f, "we are solving dependencies of {} {}", package, version)
             }
-            Self::NoVersions(package, set, _) => {
+            Self::NoVersions(package, set, _metadata) => {
                 if set == &VS::full() {
                     write!(f, "there is no available version for {}", package)
                 } else {
                     write!(f, "there is no version of {} in {}", package, set)
                 }
             }
-            Self::Unavailable(package, set, reason) => {
+            Self::Unavailable(package, set, metadata) => {
                 if set == &VS::full() {
                     write!(
                         f,
-                        "dependencies of {} are unavailable because {reason}",
-                        package
+                        "dependencies of {} are unavailable {}",
+                        package, metadata
                     )
                 } else {
                     write!(
                         f,
-                        "dependencies of {} at version {} are unavailable because {reason}",
-                        package, set
+                        "dependencies of {} at version {} are unavailable {}",
+                        package, set, metadata
                     )
                 }
             }
-            Self::FromDependencyOf(p, set_p, dep, set_dep) => {
+            Self::FromDependencyOf(p, set_p, dep, set_dep, _metadata) => {
                 if set_p == &VS::full() && set_dep == &VS::full() {
                     write!(f, "{} depends on {}", p, dep)
                 } else if set_p == &VS::full() {
@@ -214,12 +218,12 @@ impl<P: Package, VS: VersionSet> fmt::Display for External<P, VS> {
 }
 
 /// Trait for formatting outputs in the reporter.
-pub trait ReportFormatter<P: Package, VS: VersionSet> {
+pub trait ReportFormatter<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Output type of the report.
     type Output;
 
     /// Format an [External] incompatibility.
-    fn format_external(&self, external: &External<P, VS>) -> Self::Output;
+    fn format_external(&self, external: &External<P, VS, M>) -> Self::Output;
 
     /// Format terms of an incompatibility.
     fn format_terms(&self, terms: &Map<P, Term<VS>>) -> Self::Output;
@@ -227,8 +231,8 @@ pub trait ReportFormatter<P: Package, VS: VersionSet> {
     /// Simplest case, we just combine two external incompatibilities.
     fn explain_both_external(
         &self,
-        external1: &External<P, VS>,
-        external2: &External<P, VS>,
+        external1: &External<P, VS, M>,
+        external2: &External<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> Self::Output;
 
@@ -236,9 +240,9 @@ pub trait ReportFormatter<P: Package, VS: VersionSet> {
     fn explain_both_ref(
         &self,
         ref_id1: usize,
-        derived1: &Derived<P, VS>,
+        derived1: &Derived<P, VS, M>,
         ref_id2: usize,
-        derived2: &Derived<P, VS>,
+        derived2: &Derived<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> Self::Output;
 
@@ -248,15 +252,15 @@ pub trait ReportFormatter<P: Package, VS: VersionSet> {
     fn explain_ref_and_external(
         &self,
         ref_id: usize,
-        derived: &Derived<P, VS>,
-        external: &External<P, VS>,
+        derived: &Derived<P, VS, M>,
+        external: &External<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> Self::Output;
 
     /// Add an external cause to the chain of explanations.
     fn and_explain_external(
         &self,
-        external: &External<P, VS>,
+        external: &External<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> Self::Output;
 
@@ -264,15 +268,15 @@ pub trait ReportFormatter<P: Package, VS: VersionSet> {
     fn and_explain_ref(
         &self,
         ref_id: usize,
-        derived: &Derived<P, VS>,
+        derived: &Derived<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> Self::Output;
 
     /// Add an already explained incompat to the chain of explanations.
     fn and_explain_prior_and_external(
         &self,
-        prior_external: &External<P, VS>,
-        external: &External<P, VS>,
+        prior_external: &External<P, VS, M>,
+        external: &External<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> Self::Output;
 }
@@ -281,10 +285,12 @@ pub trait ReportFormatter<P: Package, VS: VersionSet> {
 #[derive(Default, Debug)]
 pub struct DefaultStringReportFormatter;
 
-impl<P: Package, VS: VersionSet> ReportFormatter<P, VS> for DefaultStringReportFormatter {
+impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> ReportFormatter<P, VS, M>
+    for DefaultStringReportFormatter
+{
     type Output = String;
 
-    fn format_external(&self, external: &External<P, VS>) -> String {
+    fn format_external(&self, external: &External<P, VS, M>) -> String {
         external.to_string()
     }
 
@@ -311,8 +317,8 @@ impl<P: Package, VS: VersionSet> ReportFormatter<P, VS> for DefaultStringReportF
     /// Simplest case, we just combine two external incompatibilities.
     fn explain_both_external(
         &self,
-        external1: &External<P, VS>,
-        external2: &External<P, VS>,
+        external1: &External<P, VS, M>,
+        external2: &External<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> String {
         // TODO: order should be chosen to make it more logical.
@@ -328,9 +334,9 @@ impl<P: Package, VS: VersionSet> ReportFormatter<P, VS> for DefaultStringReportF
     fn explain_both_ref(
         &self,
         ref_id1: usize,
-        derived1: &Derived<P, VS>,
+        derived1: &Derived<P, VS, M>,
         ref_id2: usize,
-        derived2: &Derived<P, VS>,
+        derived2: &Derived<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> String {
         // TODO: order should be chosen to make it more logical.
@@ -350,8 +356,8 @@ impl<P: Package, VS: VersionSet> ReportFormatter<P, VS> for DefaultStringReportF
     fn explain_ref_and_external(
         &self,
         ref_id: usize,
-        derived: &Derived<P, VS>,
-        external: &External<P, VS>,
+        derived: &Derived<P, VS, M>,
+        external: &External<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> String {
         // TODO: order should be chosen to make it more logical.
@@ -367,7 +373,7 @@ impl<P: Package, VS: VersionSet> ReportFormatter<P, VS> for DefaultStringReportF
     /// Add an external cause to the chain of explanations.
     fn and_explain_external(
         &self,
-        external: &External<P, VS>,
+        external: &External<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> String {
         format!(
@@ -381,7 +387,7 @@ impl<P: Package, VS: VersionSet> ReportFormatter<P, VS> for DefaultStringReportF
     fn and_explain_ref(
         &self,
         ref_id: usize,
-        derived: &Derived<P, VS>,
+        derived: &Derived<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> String {
         format!(
@@ -395,8 +401,8 @@ impl<P: Package, VS: VersionSet> ReportFormatter<P, VS> for DefaultStringReportF
     /// Add an already explained incompat to the chain of explanations.
     fn and_explain_prior_and_external(
         &self,
-        prior_external: &External<P, VS>,
-        external: &External<P, VS>,
+        prior_external: &External<P, VS, M>,
+        external: &External<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> String {
         format!(
@@ -429,9 +435,14 @@ impl DefaultStringReporter {
         }
     }
 
-    fn build_recursive<P: Package, VS: VersionSet, F: ReportFormatter<P, VS, Output = String>>(
+    fn build_recursive<
+        P: Package,
+        VS: VersionSet,
+        M: Eq + Clone + Debug + Display,
+        F: ReportFormatter<P, VS, M, Output = String>,
+    >(
         &mut self,
-        derived: &Derived<P, VS>,
+        derived: &Derived<P, VS, M>,
         formatter: &F,
     ) {
         self.build_recursive_helper(derived, formatter);
@@ -447,10 +458,11 @@ impl DefaultStringReporter {
     fn build_recursive_helper<
         P: Package,
         VS: VersionSet,
-        F: ReportFormatter<P, VS, Output = String>,
+        M: Eq + Clone + Debug + Display,
+        F: ReportFormatter<P, VS, M, Output = String>,
     >(
         &mut self,
-        current: &Derived<P, VS>,
+        current: &Derived<P, VS, M>,
         formatter: &F,
     ) {
         match (current.cause1.deref(), current.cause2.deref()) {
@@ -532,10 +544,15 @@ impl DefaultStringReporter {
     ///
     /// The result will depend on the fact that the derived incompatibility
     /// has already been explained or not.
-    fn report_one_each<P: Package, VS: VersionSet, F: ReportFormatter<P, VS, Output = String>>(
+    fn report_one_each<
+        P: Package,
+        VS: VersionSet,
+        M: Eq + Clone + Debug + Display,
+        F: ReportFormatter<P, VS, M, Output = String>,
+    >(
         &mut self,
-        derived: &Derived<P, VS>,
-        external: &External<P, VS>,
+        derived: &Derived<P, VS, M>,
+        external: &External<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
         formatter: &F,
     ) {
@@ -554,11 +571,12 @@ impl DefaultStringReporter {
     fn report_recurse_one_each<
         P: Package,
         VS: VersionSet,
-        F: ReportFormatter<P, VS, Output = String>,
+        M: Eq + Clone + Debug + Display,
+        F: ReportFormatter<P, VS, M, Output = String>,
     >(
         &mut self,
-        derived: &Derived<P, VS>,
-        external: &External<P, VS>,
+        derived: &Derived<P, VS, M>,
+        external: &External<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
         formatter: &F,
     ) {
@@ -606,10 +624,12 @@ impl DefaultStringReporter {
     }
 }
 
-impl<P: Package, VS: VersionSet> Reporter<P, VS> for DefaultStringReporter {
+impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Reporter<P, VS, M>
+    for DefaultStringReporter
+{
     type Output = String;
 
-    fn report(derivation_tree: &DerivationTree<P, VS>) -> Self::Output {
+    fn report(derivation_tree: &DerivationTree<P, VS, M>) -> Self::Output {
         let formatter = DefaultStringReportFormatter;
         match derivation_tree {
             DerivationTree::External(external) => formatter.format_external(external),
@@ -622,8 +642,8 @@ impl<P: Package, VS: VersionSet> Reporter<P, VS> for DefaultStringReporter {
     }
 
     fn report_with_formatter(
-        derivation_tree: &DerivationTree<P, VS>,
-        formatter: &impl ReportFormatter<P, VS, Output = Self::Output>,
+        derivation_tree: &DerivationTree<P, VS, M>,
+        formatter: &impl ReportFormatter<P, VS, M, Output = Self::Output>,
     ) -> Self::Output {
         match derivation_tree {
             DerivationTree::External(external) => formatter.format_external(external),

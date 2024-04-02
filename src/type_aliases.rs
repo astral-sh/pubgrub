@@ -14,5 +14,8 @@ pub type Set<V> = rustc_hash::FxHashSet<V>;
 pub type SelectedDependencies<DP> =
     Map<<DP as DependencyProvider>::P, <DP as DependencyProvider>::V>;
 
-pub(crate) type IncompDpId<DP> =
-    IncompId<<DP as DependencyProvider>::P, <DP as DependencyProvider>::VS>;
+pub(crate) type IncompDpId<DP> = IncompId<
+    <DP as DependencyProvider>::P,
+    <DP as DependencyProvider>::VS,
+    <DP as DependencyProvider>::M,
+>;

@@ -172,6 +172,7 @@ pub fn resolve<DP: DependencyProvider>(
             let dep_incompats = state.add_incompatibility_from_dependencies(
                 p.clone(),
                 v.clone(),
+                m.clone(),
                 known_dependencies,
             );
 
