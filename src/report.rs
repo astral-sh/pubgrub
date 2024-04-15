@@ -46,13 +46,13 @@ pub enum DerivationTree<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Disp
 #[derive(Debug, Clone)]
 pub enum External<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
-    NotRoot(P, VS::V, M),
-    /// There are no versions in the given set for this package. A string reason is included.
-    NoVersions(P, VS, M),
-    /// The package is unusable in the given set. A string reason is included.
-    Unavailable(P, VS, M),
+    NotRoot(P, VS::V),
+    /// There are no versions in the given set for this package.
+    NoVersions(P, VS),
     /// Incompatibility coming from the dependencies of a given package.
-    FromDependencyOf(P, VS, P, VS, M),
+    FromDependencyOf(P, VS, P, VS),
+    /// The package is unusable for reasons outside pubgrub.
+    Custom(P, VS, M),
 }
 
 /// Incompatibility derived from two others.
@@ -78,13 +78,11 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> DerivationTree
         let mut packages = FxHashSet::default();
         match self {
             Self::External(external) => match external {
-                External::FromDependencyOf(p, _, p2, _, _) => {
+                External::FromDependencyOf(p, _, p2, _) => {
                     packages.insert(p);
                     packages.insert(p2);
                 }
-                External::NoVersions(p, _, _)
-                | External::NotRoot(p, _, _)
-                | External::Unavailable(p, ..) => {
+                External::NoVersions(p, _) | External::NotRoot(p, _) | External::Custom(p, ..) => {
                     packages.insert(p);
                 }
             },
@@ -113,14 +111,14 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> DerivationTree
                     Arc::make_mut(&mut derived.cause1),
                     Arc::make_mut(&mut derived.cause2),
                 ) {
-                    (DerivationTree::External(External::NoVersions(p, r, _)), ref mut cause2) => {
+                    (DerivationTree::External(External::NoVersions(p, r)), ref mut cause2) => {
                         cause2.collapse_no_versions();
                         *self = cause2
                             .clone()
                             .merge_no_versions(p.to_owned(), r.to_owned())
                             .unwrap_or_else(|| self.to_owned());
                     }
-                    (ref mut cause1, DerivationTree::External(External::NoVersions(p, r, _))) => {
+                    (ref mut cause1, DerivationTree::External(External::NoVersions(p, r))) => {
                         cause1.collapse_no_versions();
                         *self = cause1
                             .clone()
@@ -141,22 +139,19 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> DerivationTree
             // TODO: take care of the Derived case.
             // Once done, we can remove the Option.
             DerivationTree::Derived(_) => Some(self),
-            DerivationTree::External(External::NotRoot(_, _, _)) => {
+            DerivationTree::External(External::NotRoot(_, _)) => {
                 panic!("How did we end up with a NoVersions merged with a NotRoot?")
             }
             //
             // Cannot be merged because the reason may not match
-            DerivationTree::External(External::NoVersions(_, _, _)) => None,
-            // Cannot be merged because the reason may not match
-            DerivationTree::External(External::Unavailable(_, _, _)) => None,
-            DerivationTree::External(External::FromDependencyOf(p1, r1, p2, r2, m)) => {
+            DerivationTree::External(External::NoVersions(_, _)) => None,
+            DerivationTree::External(External::FromDependencyOf(p1, r1, p2, r2)) => {
                 if p1 == package {
                     Some(DerivationTree::External(External::FromDependencyOf(
                         p1,
                         r1.union(&set),
                         p2,
                         r2,
-                        m,
                     )))
                 } else {
                     Some(DerivationTree::External(External::FromDependencyOf(
@@ -164,10 +159,11 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> DerivationTree
                         r1,
                         p2,
                         r2.union(&set),
-                        m,
                     )))
                 }
             }
+            // Cannot be merged because the reason may not match
+            DerivationTree::External(External::Custom(_, _, _)) => None,
         }
     }
 }
@@ -177,17 +173,17 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> fmt::Display
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NotRoot(package, version, _metadata) => {
+            Self::NotRoot(package, version) => {
                 write!(f, "we are solving dependencies of {} {}", package, version)
             }
-            Self::NoVersions(package, set, _metadata) => {
+            Self::NoVersions(package, set) => {
                 if set == &VS::full() {
                     write!(f, "there is no available version for {}", package)
                 } else {
                     write!(f, "there is no version of {} in {}", package, set)
                 }
             }
-            Self::Unavailable(package, set, metadata) => {
+            Self::Custom(package, set, metadata) => {
                 if set == &VS::full() {
                     write!(
                         f,
@@ -202,7 +198,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> fmt::Display
                     )
                 }
             }
-            Self::FromDependencyOf(p, set_p, dep, set_dep, _metadata) => {
+            Self::FromDependencyOf(p, set_p, dep, set_dep) => {
                 if set_p == &VS::full() && set_dep == &VS::full() {
                     write!(f, "{} depends on {}", p, dep)
                 } else if set_p == &VS::full() {
@@ -301,12 +297,12 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> ReportFormatte
             // TODO: special case when that unique package is root.
             [(package, Term::Positive(range))] => format!("{} {} is forbidden", package, range),
             [(package, Term::Negative(range))] => format!("{} {} is mandatory", package, range),
-            [(p1, Term::Positive(r1)), (p2, Term::Negative(r2))] => {
-                self.format_external(&External::FromDependencyOf(p1, r1.clone(), p2, r2.clone()))
-            }
-            [(p1, Term::Negative(r1)), (p2, Term::Positive(r2))] => {
-                self.format_external(&External::FromDependencyOf(p2, r2.clone(), p1, r1.clone()))
-            }
+            [(p1, Term::Positive(r1)), (p2, Term::Negative(r2))] => self.format_external(
+                &External::<_, _, M>::FromDependencyOf(p1, r1.clone(), p2, r2.clone()),
+            ),
+            [(p1, Term::Negative(r1)), (p2, Term::Positive(r2))] => self.format_external(
+                &External::<_, _, M>::FromDependencyOf(p2, r2.clone(), p1, r1.clone()),
+            ),
             slice => {
                 let str_terms: Vec<_> = slice.iter().map(|(p, t)| format!("{} {}", p, t)).collect();
                 str_terms.join(", ") + " are incompatible"
@@ -326,7 +322,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> ReportFormatte
             "Because {} and {}, {}.",
             self.format_external(external1),
             self.format_external(external2),
-            self.format_terms(current_terms)
+            ReportFormatter::<P, VS, M>::format_terms(self, current_terms)
         )
     }
 
@@ -339,14 +335,14 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> ReportFormatte
         derived2: &Derived<P, VS, M>,
         current_terms: &Map<P, Term<VS>>,
     ) -> String {
-        // TODO: order should be chosen to make it more logical.
+        // TReportFormatter::<P, VS, M>::format_terms(ODO:, be chosen to make it more logical.
         format!(
             "Because {} ({}) and {} ({}), {}.",
-            self.format_terms(&derived1.terms),
+            ReportFormatter::<P, VS, M>::format_terms(self, &derived1.terms),
             ref_id1,
-            self.format_terms(&derived2.terms),
+            ReportFormatter::<P, VS, M>::format_terms(self, &derived2.terms),
             ref_id2,
-            self.format_terms(current_terms)
+            ReportFormatter::<P, VS, M>::format_terms(self, current_terms)
         )
     }
 
@@ -363,10 +359,10 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> ReportFormatte
         // TODO: order should be chosen to make it more logical.
         format!(
             "Because {} ({}) and {}, {}.",
-            self.format_terms(&derived.terms),
+            ReportFormatter::<P, VS, M>::format_terms(self, &derived.terms),
             ref_id,
             self.format_external(external),
-            self.format_terms(current_terms)
+            ReportFormatter::<P, VS, M>::format_terms(self, current_terms)
         )
     }
 
@@ -379,7 +375,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> ReportFormatte
         format!(
             "And because {}, {}.",
             self.format_external(external),
-            self.format_terms(current_terms)
+            ReportFormatter::<P, VS, M>::format_terms(self, current_terms)
         )
     }
 
@@ -392,9 +388,9 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> ReportFormatte
     ) -> String {
         format!(
             "And because {} ({}), {}.",
-            self.format_terms(&derived.terms),
+            ReportFormatter::<P, VS, M>::format_terms(self, &derived.terms),
             ref_id,
-            self.format_terms(current_terms)
+            ReportFormatter::<P, VS, M>::format_terms(self, current_terms)
         )
     }
 
@@ -409,7 +405,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> ReportFormatte
             "And because {} and {}, {}.",
             self.format_external(prior_external),
             self.format_external(external),
-            self.format_terms(current_terms)
+            ReportFormatter::<P, VS, M>::format_terms(self, current_terms)
         )
     }
 }

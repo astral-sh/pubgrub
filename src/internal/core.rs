@@ -54,12 +54,11 @@ pub struct State<DP: DependencyProvider> {
 
 impl<DP: DependencyProvider> State<DP> {
     /// Initialization of PubGrub state.
-    pub fn init(root_package: DP::P, root_version: DP::V, metadata: DP::M) -> Self {
+    pub fn init(root_package: DP::P, root_version: DP::V) -> Self {
         let mut incompatibility_store = Arena::new();
         let not_root_id = incompatibility_store.alloc(Incompatibility::not_root(
             root_package.clone(),
             root_version.clone(),
-            metadata.clone(),
         ));
         let mut incompatibilities = Map::default();
         incompatibilities.insert(root_package.clone(), vec![not_root_id]);
@@ -86,7 +85,6 @@ impl<DP: DependencyProvider> State<DP> {
         &mut self,
         package: DP::P,
         version: DP::V,
-        metadata: DP::M,
         deps: impl IntoIterator<Item = (DP::P, DP::VS)>,
     ) -> std::ops::Range<IncompDpId<DP>> {
         // Create incompatibilities and allocate them in the store.
@@ -97,7 +95,6 @@ impl<DP: DependencyProvider> State<DP> {
                         package.clone(),
                         <DP::VS as VersionSet>::singleton(version.clone()),
                         dep,
-                        metadata,
                     )
                 }));
         // Merge the newly created incompatibilities with the older ones.

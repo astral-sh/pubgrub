@@ -45,15 +45,33 @@ pub type IncompId<P, VS, M> = Id<Incompatibility<P, VS, M>>;
 #[derive(Debug, Clone)]
 pub enum Kind<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
-    NotRoot(P, VS::V, M),
-    /// There are no versions in the given range for this package. A string reason may be included.
-    NoVersions(P, VS, M),
-    /// The package is unavailable for versions in the range. A string reason is included.
-    Unavailable(P, VS, M),
+    ///
+    /// This incompatibility drives the resolution, it requires that we pick the (virtual) root
+    /// packages.
+    NotRoot(P, VS::V),
+    /// There are no versions in the given range for this package.
+    ///
+    /// This incompatibility is used when we tried all versions in a range and no version
+    /// worked, so we have to backtrack  
+    NoVersions(P, VS),
     /// Incompatibility coming from the dependencies of a given package.
-    FromDependencyOf(P, VS, P, VS, M),
+    ///
+    /// If a@1 depends on b>=1,<2, we create an incompatibility with terms `{a 1, b <1,>=2}` with
+    /// kind `FromDependencyOf(a, 1, b, >=1,<2)`.
+    ///
+    /// We can merge multiple dependents with the same version. For example, if a@1 depends on b and
+    /// a@2 depends on b, we can say instead a@1||2 depends on b.
+    FromDependencyOf(P, VS, P, VS),
     /// Derived from two causes. Stores cause ids.
+    ///
+    /// For example, if a -> b and b -> c, we can derive a -> c.
     DerivedFrom(IncompId<P, VS, M>, IncompId<P, VS, M>),
+    /// The package is unavailable for reasons outside pubgrub.
+    ///
+    /// Examples:
+    /// * The version would require building the package, but builds are disabled.
+    /// * The package is not available in the cache, but internet access has been disabled.
+    Custom(P, VS, M),
 }
 
 /// A Relation describes how a set of terms can be compared to an incompatibility.
@@ -75,41 +93,52 @@ pub enum Relation<P: Package> {
 
 impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibility<P, VS, M> {
     /// Create the initial "not Root" incompatibility.
-    pub fn not_root(package: P, version: VS::V, metadata: M) -> Self {
+    pub fn not_root(package: P, version: VS::V) -> Self {
         Self {
             package_terms: SmallMap::One([(
                 package.clone(),
                 Term::Negative(VS::singleton(version.clone())),
             )]),
-            kind: Kind::NotRoot(package, version, metadata),
+            kind: Kind::NotRoot(package, version),
         }
     }
 
-    /// Create an incompatibility to remember
-    /// that a given set does not contain any version.
-    pub fn no_versions(package: P, term: Term<VS>, metadata: M) -> Self {
+    /// Create an incompatibility to remember that a given set does not contain any version.
+    pub fn no_versions(package: P, term: Term<VS>) -> Self {
         let set = match &term {
             Term::Positive(r) => r.clone(),
             Term::Negative(_) => panic!("No version should have a positive term"),
         };
         Self {
             package_terms: SmallMap::One([(package.clone(), term)]),
-            kind: Kind::NoVersions(package, set, metadata),
+            kind: Kind::NoVersions(package, set),
         }
     }
 
-    /// Create an incompatibility to remember
-    /// that a package version is not selectable
-    pub fn unavailable(package: P, version: VS::V, metadata: M) -> Self {
-        let set = VS::singleton(version);
+    /// Create an incompatibility for a reason outside pubgrub.
+    pub fn custom_term(package: P, term: Term<VS>, metadata: M) -> Self {
+        let set = match &term {
+            Term::Positive(r) => r.clone(),
+            Term::Negative(_) => panic!("No version should have a positive term"),
+        };
         Self {
-            package_terms: SmallMap::One([(package.clone(), Term::Positive(set.clone()))]),
-            kind: Kind::Unavailable(package, set, metadata),
+            package_terms: SmallMap::One([(package.clone(), term)]),
+            kind: Kind::Custom(package, set, metadata),
+        }
+    }
+
+    /// Create an incompatibility for a reason outside pubgrub.
+    pub fn custom_version(package: P, version: VS::V, metadata: M) -> Self {
+        let set = VS::singleton(version);
+        let term = Term::Positive(set.clone());
+        Self {
+            package_terms: SmallMap::One([(package.clone(), term)]),
+            kind: Kind::Custom(package, set, metadata),
         }
     }
 
     /// Build an incompatibility from a given dependency.
-    pub fn from_dependency(package: P, versions: VS, dep: (P, VS), metadata: M) -> Self {
+    pub fn from_dependency(package: P, versions: VS, dep: (P, VS)) -> Self {
         let (p2, set2) = dep;
         Self {
             package_terms: if set2 == VS::empty() {
@@ -120,14 +149,14 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                     (p2.clone(), Term::Negative(set2.clone())),
                 ])
             },
-            kind: Kind::FromDependencyOf(package, versions, p2, set2, metadata),
+            kind: Kind::FromDependencyOf(package, versions, p2, set2),
         }
     }
 
     /// The two packages causing the incompatibility, if it was derived from dependencies.
     pub fn as_dependency(&self) -> Option<(&P, &P)> {
         match &self.kind {
-            Kind::FromDependencyOf(p1, _, p2, _, _) => Some((p1, p2)),
+            Kind::FromDependencyOf(p1, _, p2, _) => Some((p1, p2)),
             _ => None,
         }
     }
@@ -137,7 +166,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     /// When multiple versions of a package depend on the same range of another package,
     /// we can merge the two into a single incompatibility.
     /// For example, if a@1 depends on b and a@2 depends on b, we can say instead
-    /// a@1 and a@b depend on b.
+    /// a@1||2 depends on b.
     ///
     /// It is a special case of prior cause computation where the unified package
     /// is the common dependant in the two incompatibilities expressing dependencies.
@@ -172,7 +201,6 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 p2.clone(),
                 dep_term.map_or(VS::empty(), |v| v.unwrap_negative().clone()),
             ),
-            self_metadata.clone(),
         ));
     }
 
@@ -260,34 +288,35 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 };
                 DerivationTree::Derived(derived)
             }
-            Kind::NotRoot(package, version, metadata) => {
-                DerivationTree::External(External::NotRoot(package, version, metadata))
+            Kind::NotRoot(package, version) => {
+                DerivationTree::External(External::NotRoot(package, version))
             }
-            Kind::NoVersions(package, set, metadata) => DerivationTree::External(
-                External::NoVersions(package.clone(), set.clone(), metadata.clone()),
-            ),
-            Kind::Unavailable(package, set, metadata) => DerivationTree::External(
-                External::Unavailable(package.clone(), set.clone(), metadata.clone()),
-            ),
-            Kind::FromDependencyOf(package, set, dep_package, dep_set, metadata) => {
+            Kind::NoVersions(package, set) => {
+                DerivationTree::External(External::NoVersions(package.clone(), set.clone()))
+            }
+            Kind::FromDependencyOf(package, set, dep_package, dep_set) => {
                 DerivationTree::External(External::FromDependencyOf(
                     package.clone(),
                     set.clone(),
                     dep_package.clone(),
                     dep_set.clone(),
-                    metadata.clone(),
                 ))
             }
+            Kind::Custom(package, set, metadata) => DerivationTree::External(External::Custom(
+                package.clone(),
+                set.clone(),
+                metadata.clone(),
+            )),
         }
     }
 
-    fn metadata(&self) -> M {
-        match self.kind {
-            Kind::DerivedFrom(_, _) => unreachable!(),
-            Kind::FromDependencyOf(_, _, _, _, metadata) => metadata,
-            Kind::NoVersions(_, _, metadata) => metadata,
-            Kind::Unavailable(_, _, metadata) => metadata,
-            Kind::NotRoot(_, _, metadata) => metadata,
+    fn metadata(&self) -> Option<&M> {
+        match &self.kind {
+            Kind::NotRoot(_, _)
+            | Kind::NoVersions(_, _)
+            | Kind::FromDependencyOf(_, _, _, _)
+            | Kind::DerivedFrom(_, _) => None,
+            Kind::Custom(_, _, metadata) => Some(metadata),
         }
     }
 }
@@ -329,7 +358,10 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> fmt::Display
         write!(
             f,
             "{}",
-            DefaultStringReportFormatter.format_terms(&self.package_terms.as_map())
+            ReportFormatter::<P, VS, M>::format_terms(
+                &DefaultStringReportFormatter,
+                &self.package_terms.as_map()
+            )
         )
     }
 }
@@ -357,12 +389,12 @@ pub mod tests {
             let mut store = Arena::new();
             let i1 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([("p1", t1.clone()), ("p2", t2.negate())]),
-                kind: Kind::Unavailable("0", Range::full(), "foo".to_string())
+                kind: Kind::Custom("0", Range::full(), "foo".to_string())
             });
 
             let i2 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([("p2", t2), ("p3", t3.clone())]),
-                kind: Kind::Unavailable("0", Range::full(), "bar".to_string())
+                kind: Kind::Custom("0", Range::full(), "bar".to_string())
             });
 
             let mut i3 = Map::default();

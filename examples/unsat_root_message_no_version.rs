@@ -73,7 +73,7 @@ impl ReportFormatter<Package, Range<SemanticVersion>> for CustomReportFormatter 
                     format!("there is no version of {package} in {set}")
                 }
             }
-            External::Unavailable(package, set, reason) => {
+            External::Custom(package, set, reason) => {
                 if set == &Range::full() {
                     format!("dependencies of {package} are unavailable because {reason}")
                 } else {

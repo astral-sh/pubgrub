@@ -120,8 +120,7 @@ pub fn resolve<DP: DependencyProvider>(
         // Pick the next compatible version.
         let v = match decision {
             None => {
-                let inc =
-                    Incompatibility::no_versions(next.clone(), term_intersection.clone(), None);
+                let inc = Incompatibility::no_versions(next.clone(), term_intersection.clone());
                 state.add_incompatibility(inc);
                 continue;
             }
@@ -151,11 +150,11 @@ pub fn resolve<DP: DependencyProvider>(
             })?;
 
             let known_dependencies = match dependencies {
-                Dependencies::Unavailable => {
-                    state.add_incompatibility(Incompatibility::unavailable(
+                Dependencies::Unavailable(reason) => {
+                    state.add_incompatibility(Incompatibility::custom_version(
                         p.clone(),
                         v.clone(),
-                        "its dependencies could not be determined".to_string(),
+                        reason,
                     ));
                     continue;
                 }
@@ -172,7 +171,6 @@ pub fn resolve<DP: DependencyProvider>(
             let dep_incompats = state.add_incompatibility_from_dependencies(
                 p.clone(),
                 v.clone(),
-                m.clone(),
                 known_dependencies,
             );
 
@@ -194,9 +192,9 @@ pub fn resolve<DP: DependencyProvider>(
 /// An enum used by [DependencyProvider] that holds information about package dependencies.
 /// For each [Package] there is a set of versions allowed as a dependency.
 #[derive(Clone)]
-pub enum Dependencies<T> {
-    /// Package dependencies are unavailable.
-    Unavailable,
+pub enum Dependencies<T, M: Eq + Clone + Debug + Display> {
+    /// Package dependencies are unavailable with the reason why they are missing.
+    Unavailable(M),
     /// Container for all available package versions.
     Available(T),
 }
@@ -271,7 +269,10 @@ pub trait DependencyProvider {
         &self,
         package: &Self::P,
         version: &Self::V,
-    ) -> Result<Dependencies<impl IntoIterator<Item = (Self::P, Self::VS)> + Clone>, Self::Err>;
+    ) -> Result<
+        Dependencies<impl IntoIterator<Item = (Self::P, Self::VS)> + Clone, Self::M>,
+        Self::Err,
+    >;
 
     /// This is called fairly regularly during the resolution,
     /// if it returns an Err then resolution will be terminated.
@@ -384,9 +385,11 @@ impl<P: Package, VS: VersionSet> DependencyProvider for OfflineDependencyProvide
         &self,
         package: &P,
         version: &<VS as VersionSet>::V,
-    ) -> Result<Dependencies<impl IntoIterator<Item = (P, VS)> + Clone>, Self::Err> {
+    ) -> Result<Dependencies<impl IntoIterator<Item = (P, VS)> + Clone, Self::M>, Self::Err> {
         Ok(match self.dependencies(package, version) {
-            None => Dependencies::Unavailable,
+            None => {
+                Dependencies::Unavailable("its dependencies could not be determined".to_string())
+            }
             Some(dependencies) => Dependencies::Available(
                 dependencies
                     .into_iter()
