@@ -8,7 +8,7 @@ use std::convert::Infallible;
 use pubgrub::error::PubGrubError;
 use pubgrub::package::Package;
 use pubgrub::range::Range;
-use pubgrub::report::{DefaultStringReporter, DerivationTree, External, Reporter};
+use pubgrub::report::{DefaultStringReporter, DerivationTree, Reporter};
 use pubgrub::solver::{resolve, Dependencies, DependencyProvider, OfflineDependencyProvider};
 use pubgrub::type_aliases::SelectedDependencies;
 use pubgrub::version::SemanticVersion;
@@ -373,7 +373,7 @@ fn errors_the_same_with_only_report_dependencies<N: Package + Ord>(
         tree: &DerivationTree<N, VS>,
     ) {
         match tree {
-            DerivationTree::External(External::FromDependencyOf(n1, vs1, n2, _)) => {
+            DerivationTree::FromDependencyOf(n1, vs1, n2, _) => {
                 to_retain.push((n1.clone(), vs1.clone(), n2.clone()));
             }
             DerivationTree::Derived(d) => {

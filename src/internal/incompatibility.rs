@@ -9,9 +9,7 @@ use std::sync::Arc;
 use crate::internal::arena::{Arena, Id};
 use crate::internal::small_map::SmallMap;
 use crate::package::Package;
-use crate::report::{
-    DefaultStringReportFormatter, DerivationTree, Derived, External, ReportFormatter,
-};
+use crate::report::{DefaultStringReportFormatter, DerivationTree, Derived, ReportFormatter};
 use crate::term::{self, Term};
 use crate::type_aliases::{Map, Set};
 use crate::version_set::VersionSet;
@@ -249,18 +247,14 @@ impl<P: Package, VS: VersionSet> Incompatibility<P, VS> {
                 };
                 DerivationTree::Derived(derived)
             }
-            Kind::NotRoot(package, version) => {
-                DerivationTree::External(External::NotRoot(package, version))
-            }
-            Kind::NoVersions(package, set) => {
-                DerivationTree::External(External::NoVersions(package, set))
-            }
+            Kind::NotRoot(package, version) => DerivationTree::NotRoot(package, version),
+            Kind::NoVersions(package, set) => DerivationTree::NoVersions(package, set),
             Kind::UnavailableDependencies(package, set) => {
-                DerivationTree::External(External::UnavailableDependencies(package, set))
+                DerivationTree::UnavailableDependencies(package, set)
             }
-            Kind::FromDependencyOf(package, set, dep_package, dep_set) => DerivationTree::External(
-                External::FromDependencyOf(package, set, dep_package, dep_set),
-            ),
+            Kind::FromDependencyOf(package, set, dep_package, dep_set) => {
+                DerivationTree::FromDependencyOf(package, set, dep_package, dep_set)
+            }
         }
     }
 }

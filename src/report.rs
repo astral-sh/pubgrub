@@ -33,16 +33,8 @@ pub trait Reporter<P: Package, VS: VersionSet> {
 /// to solve the dependencies of our root package.
 #[derive(Debug, Clone)]
 pub enum DerivationTree<P: Package, VS: VersionSet> {
-    /// External incompatibility.
-    External(External<P, VS>),
     /// Incompatibility derived from two others.
     Derived(Derived<P, VS>),
-}
-
-/// Incompatibilities that are not derived from others,
-/// they have their own reason.
-#[derive(Debug, Clone)]
-pub enum External<P: Package, VS: VersionSet> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
     NotRoot(P, VS::V),
     /// There are no versions in the given set for this package.
@@ -80,31 +72,28 @@ impl<P: Package, VS: VersionSet> DerivationTree<P, VS> {
     /// was not run in some kind of offline mode that may not
     /// have access to all versions existing.
     pub fn collapse_no_versions(&mut self) {
-        match self {
-            DerivationTree::External(_) => {}
-            DerivationTree::Derived(derived) => {
-                match (
-                    Arc::make_mut(&mut derived.cause1),
-                    Arc::make_mut(&mut derived.cause2),
-                ) {
-                    (DerivationTree::External(External::NoVersions(p, r)), ref mut cause2) => {
-                        cause2.collapse_no_versions();
-                        *self = cause2
-                            .clone()
-                            .merge_no_versions(p.to_owned(), r.to_owned())
-                            .unwrap_or_else(|| self.to_owned());
-                    }
-                    (ref mut cause1, DerivationTree::External(External::NoVersions(p, r))) => {
-                        cause1.collapse_no_versions();
-                        *self = cause1
-                            .clone()
-                            .merge_no_versions(p.to_owned(), r.to_owned())
-                            .unwrap_or_else(|| self.to_owned());
-                    }
-                    _ => {
-                        Arc::make_mut(&mut derived.cause1).collapse_no_versions();
-                        Arc::make_mut(&mut derived.cause2).collapse_no_versions();
-                    }
+        if let DerivationTree::Derived(derived) = self {
+            match (
+                Arc::make_mut(&mut derived.cause1),
+                Arc::make_mut(&mut derived.cause2),
+            ) {
+                (DerivationTree::NoVersions(p, r), ref mut cause2) => {
+                    cause2.collapse_no_versions();
+                    *self = cause2
+                        .clone()
+                        .merge_no_versions(p.to_owned(), r.to_owned())
+                        .unwrap_or_else(|| self.to_owned());
+                }
+                (ref mut cause1, DerivationTree::NoVersions(p, r)) => {
+                    cause1.collapse_no_versions();
+                    *self = cause1
+                        .clone()
+                        .merge_no_versions(p.to_owned(), r.to_owned())
+                        .unwrap_or_else(|| self.to_owned());
+                }
+                _ => {
+                    Arc::make_mut(&mut derived.cause1).collapse_no_versions();
+                    Arc::make_mut(&mut derived.cause2).collapse_no_versions();
                 }
             }
         }
@@ -115,37 +104,27 @@ impl<P: Package, VS: VersionSet> DerivationTree<P, VS> {
             // TODO: take care of the Derived case.
             // Once done, we can remove the Option.
             DerivationTree::Derived(_) => Some(self),
-            DerivationTree::External(External::NotRoot(_, _)) => {
+            DerivationTree::NotRoot(_, _) => {
                 panic!("How did we end up with a NoVersions merged with a NotRoot?")
             }
-            DerivationTree::External(External::NoVersions(_, r)) => Some(DerivationTree::External(
-                External::NoVersions(package, set.union(&r)),
-            )),
-            DerivationTree::External(External::UnavailableDependencies(_, r)) => Some(
-                DerivationTree::External(External::UnavailableDependencies(package, set.union(&r))),
+            DerivationTree::NoVersions(_, r) => {
+                Some(DerivationTree::NoVersions(package, set.union(&r)))
+            }
+            DerivationTree::UnavailableDependencies(_, r) => Some(
+                DerivationTree::UnavailableDependencies(package, set.union(&r)),
             ),
-            DerivationTree::External(External::FromDependencyOf(p1, r1, p2, r2)) => {
+            DerivationTree::FromDependencyOf(p1, r1, p2, r2) => {
                 if p1 == package {
-                    Some(DerivationTree::External(External::FromDependencyOf(
-                        p1,
-                        r1.union(&set),
-                        p2,
-                        r2,
-                    )))
+                    Some(DerivationTree::FromDependencyOf(p1, r1.union(&set), p2, r2))
                 } else {
-                    Some(DerivationTree::External(External::FromDependencyOf(
-                        p1,
-                        r1,
-                        p2,
-                        r2.union(&set),
-                    )))
+                    Some(DerivationTree::FromDependencyOf(p1, r1, p2, r2.union(&set)))
                 }
             }
         }
     }
 }
 
-impl<P: Package, VS: VersionSet> fmt::Display for External<P, VS> {
+impl<P: Package, VS: VersionSet> fmt::Display for DerivationTree<P, VS> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NotRoot(package, version) => {
@@ -180,6 +159,9 @@ impl<P: Package, VS: VersionSet> fmt::Display for External<P, VS> {
                     write!(f, "{} {} depends on {} {}", p, set_p, dep, set_dep)
                 }
             }
+            Self::Derived(_) => {
+                panic!("Got derived, while only external can be formatted");
+            }
         }
     }
 }
@@ -190,7 +172,7 @@ pub trait ReportFormatter<P: Package, VS: VersionSet> {
     type Output;
 
     /// Format an [External] incompatibility.
-    fn format_external(&self, external: &External<P, VS>) -> Self::Output;
+    fn format_external(&self, external: &DerivationTree<P, VS>) -> Self::Output;
 
     /// Format terms of an incompatibility.
     fn format_terms(&self, terms: &Map<P, Term<VS>>) -> Self::Output;
@@ -203,7 +185,7 @@ pub struct DefaultStringReportFormatter;
 impl<P: Package, VS: VersionSet> ReportFormatter<P, VS> for DefaultStringReportFormatter {
     type Output = String;
 
-    fn format_external(&self, external: &External<P, VS>) -> String {
+    fn format_external(&self, external: &DerivationTree<P, VS>) -> String {
         external.to_string()
     }
 
@@ -214,12 +196,12 @@ impl<P: Package, VS: VersionSet> ReportFormatter<P, VS> for DefaultStringReportF
             // TODO: special case when that unique package is root.
             [(package, Term::Positive(range))] => format!("{} {} is forbidden", package, range),
             [(package, Term::Negative(range))] => format!("{} {} is mandatory", package, range),
-            [(p1, Term::Positive(r1)), (p2, Term::Negative(r2))] => {
-                self.format_external(&External::FromDependencyOf(p1, r1.clone(), p2, r2.clone()))
-            }
-            [(p1, Term::Negative(r1)), (p2, Term::Positive(r2))] => {
-                self.format_external(&External::FromDependencyOf(p2, r2.clone(), p1, r1.clone()))
-            }
+            [(p1, Term::Positive(r1)), (p2, Term::Negative(r2))] => self.format_external(
+                &DerivationTree::FromDependencyOf(p1, r1.clone(), p2, r2.clone()),
+            ),
+            [(p1, Term::Negative(r1)), (p2, Term::Positive(r2))] => self.format_external(
+                &DerivationTree::FromDependencyOf(p2, r2.clone(), p1, r1.clone()),
+            ),
             slice => {
                 let str_terms: Vec<_> = slice.iter().map(|(p, t)| format!("{} {}", p, t)).collect();
                 str_terms.join(", ") + " are incompatible"
@@ -274,24 +256,6 @@ impl DefaultStringReporter {
         formatter: &F,
     ) {
         match (current.cause1.deref(), current.cause2.deref()) {
-            (DerivationTree::External(external1), DerivationTree::External(external2)) => {
-                // Simplest case, we just combine two external incompatibilities.
-                self.lines.push(Self::explain_both_external(
-                    external1,
-                    external2,
-                    &current.terms,
-                    formatter,
-                ));
-            }
-            (DerivationTree::Derived(derived), DerivationTree::External(external)) => {
-                // One cause is derived, so we explain this first
-                // then we add the one-line external part
-                // and finally conclude with the current incompatibility.
-                self.report_one_each(derived, external, &current.terms, formatter);
-            }
-            (DerivationTree::External(external), DerivationTree::Derived(derived)) => {
-                self.report_one_each(derived, external, &current.terms, formatter);
-            }
             (DerivationTree::Derived(derived1), DerivationTree::Derived(derived2)) => {
                 // This is the most complex case since both causes are also derived.
                 match (
@@ -356,6 +320,24 @@ impl DefaultStringReporter {
                     }
                 }
             }
+            (DerivationTree::Derived(derived), external) => {
+                // One cause is derived, so we explain this first
+                // then we add the one-line external part
+                // and finally conclude with the current incompatibility.
+                self.report_one_each(derived, external, &current.terms, formatter);
+            }
+            (external, DerivationTree::Derived(derived)) => {
+                self.report_one_each(derived, external, &current.terms, formatter);
+            }
+            (external1, external2) => {
+                // Simplest case, we just combine two external incompatibilities.
+                self.lines.push(Self::explain_both_external(
+                    external1,
+                    external2,
+                    &current.terms,
+                    formatter,
+                ));
+            }
         }
     }
 
@@ -366,7 +348,7 @@ impl DefaultStringReporter {
     fn report_one_each<P: Package, VS: VersionSet, F: ReportFormatter<P, VS, Output = String>>(
         &mut self,
         derived: &Derived<P, VS>,
-        external: &External<P, VS>,
+        external: &DerivationTree<P, VS>,
         current_terms: &Map<P, Term<VS>>,
         formatter: &F,
     ) {
@@ -390,14 +372,22 @@ impl DefaultStringReporter {
     >(
         &mut self,
         derived: &Derived<P, VS>,
-        external: &External<P, VS>,
+        external: &DerivationTree<P, VS>,
         current_terms: &Map<P, Term<VS>>,
         formatter: &F,
     ) {
         match (derived.cause1.deref(), derived.cause2.deref()) {
+            (DerivationTree::Derived(_), DerivationTree::Derived(_)) => {
+                self.build_recursive(derived, formatter);
+                self.lines.push(Self::and_explain_external(
+                    external,
+                    current_terms,
+                    formatter,
+                ));
+            }
             // If the derived cause has itself one external prior cause,
             // we can chain the external explanations.
-            (DerivationTree::Derived(prior_derived), DerivationTree::External(prior_external)) => {
+            (DerivationTree::Derived(prior_derived), prior_external) => {
                 self.build_recursive(prior_derived, formatter);
                 self.lines.push(Self::and_explain_prior_and_external(
                     prior_external,
@@ -408,7 +398,7 @@ impl DefaultStringReporter {
             }
             // If the derived cause has itself one external prior cause,
             // we can chain the external explanations.
-            (DerivationTree::External(prior_external), DerivationTree::Derived(prior_derived)) => {
+            (prior_external, DerivationTree::Derived(prior_derived)) => {
                 self.build_recursive(prior_derived, formatter);
                 self.lines.push(Self::and_explain_prior_and_external(
                     prior_external,
@@ -436,8 +426,8 @@ impl DefaultStringReporter {
         VS: VersionSet,
         F: ReportFormatter<P, VS, Output = String>,
     >(
-        external1: &External<P, VS>,
-        external2: &External<P, VS>,
+        external1: &DerivationTree<P, VS>,
+        external2: &DerivationTree<P, VS>,
         current_terms: &Map<P, Term<VS>>,
         formatter: &F,
     ) -> String {
@@ -480,7 +470,7 @@ impl DefaultStringReporter {
     >(
         ref_id: usize,
         derived: &Derived<P, VS>,
-        external: &External<P, VS>,
+        external: &DerivationTree<P, VS>,
         current_terms: &Map<P, Term<VS>>,
         formatter: &F,
     ) -> String {
@@ -500,7 +490,7 @@ impl DefaultStringReporter {
         VS: VersionSet,
         F: ReportFormatter<P, VS, Output = String>,
     >(
-        external: &External<P, VS>,
+        external: &DerivationTree<P, VS>,
         current_terms: &Map<P, Term<VS>>,
         formatter: &F,
     ) -> String {
@@ -532,8 +522,8 @@ impl DefaultStringReporter {
         VS: VersionSet,
         F: ReportFormatter<P, VS, Output = String>,
     >(
-        prior_external: &External<P, VS>,
-        external: &External<P, VS>,
+        prior_external: &DerivationTree<P, VS>,
+        external: &DerivationTree<P, VS>,
         current_terms: &Map<P, Term<VS>>,
         formatter: &F,
     ) -> String {
@@ -566,12 +556,12 @@ impl<P: Package, VS: VersionSet> Reporter<P, VS> for DefaultStringReporter {
     fn report(derivation_tree: &DerivationTree<P, VS>) -> Self::Output {
         let formatter = DefaultStringReportFormatter;
         match derivation_tree {
-            DerivationTree::External(external) => formatter.format_external(external),
             DerivationTree::Derived(derived) => {
                 let mut reporter = Self::new();
                 reporter.build_recursive(derived, &formatter);
                 reporter.lines.join("\n")
             }
+            external => formatter.format_external(external),
         }
     }
 
@@ -580,12 +570,12 @@ impl<P: Package, VS: VersionSet> Reporter<P, VS> for DefaultStringReporter {
         formatter: &impl ReportFormatter<P, VS, Output = Self::Output>,
     ) -> Self::Output {
         match derivation_tree {
-            DerivationTree::External(external) => formatter.format_external(external),
             DerivationTree::Derived(derived) => {
                 let mut reporter = Self::new();
                 reporter.build_recursive(derived, formatter);
                 reporter.lines.join("\n")
             }
+            external => formatter.format_external(external),
         }
     }
 }

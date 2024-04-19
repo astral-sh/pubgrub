@@ -2,11 +2,11 @@
 
 use pubgrub::error::PubGrubError;
 use pubgrub::range::Range;
-use pubgrub::report::Reporter;
+use pubgrub::report::{DerivationTree, Reporter};
 use pubgrub::solver::{resolve, OfflineDependencyProvider};
 use pubgrub::version::SemanticVersion;
 
-use pubgrub::report::{DefaultStringReporter, External, ReportFormatter};
+use pubgrub::report::{DefaultStringReporter, ReportFormatter};
 use pubgrub::term::Term;
 use pubgrub::type_aliases::Map;
 use std::fmt::{self, Display};
@@ -49,10 +49,10 @@ impl ReportFormatter<Package, Range<SemanticVersion>> for CustomReportFormatter 
                 format!("{package} {range} is mandatory")
             }
             [(p1, Term::Positive(r1)), (p2, Term::Negative(r2))] => {
-                External::FromDependencyOf(p1, r1.clone(), p2, r2.clone()).to_string()
+                DerivationTree::FromDependencyOf(p1, r1.clone(), p2, r2.clone()).to_string()
             }
             [(p1, Term::Negative(r1)), (p2, Term::Positive(r2))] => {
-                External::FromDependencyOf(p2, r2.clone(), p1, r1.clone()).to_string()
+                DerivationTree::FromDependencyOf(p2, r2.clone(), p1, r1.clone()).to_string()
             }
             slice => {
                 let str_terms: Vec<_> = slice.iter().map(|(p, t)| format!("{p} {t}")).collect();
@@ -61,26 +61,29 @@ impl ReportFormatter<Package, Range<SemanticVersion>> for CustomReportFormatter 
         }
     }
 
-    fn format_external(&self, external: &External<Package, Range<SemanticVersion>>) -> String {
+    fn format_external(
+        &self,
+        external: &DerivationTree<Package, Range<SemanticVersion>>,
+    ) -> String {
         match external {
-            External::NotRoot(package, version) => {
+            DerivationTree::NotRoot(package, version) => {
                 format!("we are solving dependencies of {package} {version}")
             }
-            External::NoVersions(package, set) => {
+            DerivationTree::NoVersions(package, set) => {
                 if set == &Range::full() {
                     format!("there is no available version for {package}")
                 } else {
                     format!("there is no version of {package} in {set}")
                 }
             }
-            External::UnavailableDependencies(package, set) => {
+            DerivationTree::UnavailableDependencies(package, set) => {
                 if set == &Range::full() {
                     format!("dependencies of {package} are unavailable")
                 } else {
                     format!("dependencies of {package} at version {set} are unavailable")
                 }
             }
-            External::FromDependencyOf(package, package_set, dependency, dependency_set) => {
+            DerivationTree::FromDependencyOf(package, package_set, dependency, dependency_set) => {
                 if package_set == &Range::full() && dependency_set == &Range::full() {
                     format!("{package} depends on {dependency}")
                 } else if package_set == &Range::full() {
@@ -98,6 +101,9 @@ impl ReportFormatter<Package, Range<SemanticVersion>> for CustomReportFormatter 
                 } else {
                     format!("{package} {package_set} depends on {dependency} {dependency_set}")
                 }
+            }
+            DerivationTree::Derived(_) => {
+                panic!("Got derived, while only external can be formatted");
             }
         }
     }
