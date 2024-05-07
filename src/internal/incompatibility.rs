@@ -288,7 +288,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 DerivationTree::External(External::NotRoot(package, version))
             }
             Kind::NoVersions(package, set) => {
-                DerivationTree::External(External::NoVersions(package.clone(), set.clone(), None))
+                DerivationTree::External(External::NoVersions(package.clone(), set.clone()))
             }
             Kind::FromDependencyOf(package, set, dep_package, dep_set) => {
                 DerivationTree::External(External::FromDependencyOf(
@@ -354,12 +354,10 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> fmt::Display
 
 #[cfg(test)]
 pub mod tests {
-    use proptest::prelude::*;
-
+    use super::*;
     use crate::range::Range;
     use crate::term::tests::strategy as term_strat;
-
-    use super::*;
+    use proptest::prelude::*;
 
     proptest! {
 
@@ -375,12 +373,12 @@ pub mod tests {
             let mut store = Arena::new();
             let i1 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([("p1", t1.clone()), ("p2", t2.negate())]),
-                kind: Kind::Custom("0", Range::full(), "foo".to_string())
+                kind: Kind::<_, _, String>::FromDependencyOf("p1", Range::full(), "p2", Range::full())
             });
 
             let i2 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([("p2", t2), ("p3", t3.clone())]),
-                kind: Kind::Custom("0", Range::full(), "bar".to_string())
+                kind: Kind::<_, _, String>::FromDependencyOf("p2", Range::full(), "p3", Range::full())
             });
 
             let mut i3 = Map::default();

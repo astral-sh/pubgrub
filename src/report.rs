@@ -147,7 +147,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> DerivationTree
                 panic!("How did we end up with a NoVersions merged with a NotRoot?")
             }
             // Cannot be merged because the reason may not match
-            DerivationTree::External(External::NoVersions(_, _, _)) => None,
+            DerivationTree::External(External::NoVersions(_, _)) => None,
             DerivationTree::External(External::Custom(_, r, reason)) => Some(
                 DerivationTree::External(External::Custom(package, set.union(&r), reason)),
             ),
