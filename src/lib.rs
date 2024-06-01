@@ -217,7 +217,6 @@
 //! do not exist in your cache.
 
 #![warn(missing_docs)]
-#![allow(clippy::all)]
 
 pub mod error;
 pub mod package;
