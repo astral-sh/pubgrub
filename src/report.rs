@@ -45,7 +45,7 @@ pub enum DerivationTree<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Disp
 pub enum External<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
     NotRoot(P, VS::V),
-    /// There are no versions in the given set for this package. A string reason is included.
+    /// There are no versions in the given set for this package.
     NoVersions(P, VS),
     /// Incompatibility coming from the dependencies of a given package.
     FromDependencyOf(P, VS, P, VS),
