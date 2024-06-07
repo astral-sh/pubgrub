@@ -127,6 +127,17 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> DerivationTree
                             .merge_no_versions(p.to_owned(), r.to_owned())
                             .unwrap_or_else(|| self.to_owned());
                     }
+                    (
+                        ref mut cause1,
+                        DerivationTree::External(External::Custom(p, r, metadata)),
+                    ) => {
+                        dbg!("AAAAAAAa");
+                        cause1.collapse_no_versions();
+                        *self = cause1
+                            .clone()
+                            .merge_no_versions(p.to_owned(), r.to_owned())
+                            .unwrap_or_else(|| self.to_owned());
+                    }
                     _ => {
                         Arc::make_mut(&mut derived.cause1).collapse_no_versions();
                         Arc::make_mut(&mut derived.cause2).collapse_no_versions();

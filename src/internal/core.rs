@@ -15,7 +15,7 @@ use crate::internal::partial_solution::SatisfierSearch::{
 use crate::internal::partial_solution::{DecisionLevel, PartialSolution};
 use crate::internal::small_vec::SmallVec;
 use crate::report::DerivationTree;
-use crate::solver::DependencyProvider;
+use crate::solver::{DependencyProvider, Kind};
 use crate::type_aliases::{IncompDpId, Map};
 use crate::version_set::VersionSet;
 
@@ -38,6 +38,11 @@ pub struct State<DP: DependencyProvider> {
     /// with common dependents merged.
     #[allow(clippy::type_complexity)]
     merged_dependencies: Map<(DP::P, DP::P), SmallVec<IncompDpId<DP>>>,
+
+    /// All incompatibilities expressing dependencies,
+    /// with common dependents merged.
+    #[allow(clippy::type_complexity)]
+    custom_unavailabilities: Map<DP::P, SmallVec<IncompDpId<DP>>>,
 
     /// Partial solution.
     /// TODO: remove pub.
@@ -71,6 +76,7 @@ impl<DP: DependencyProvider> State<DP> {
             incompatibility_store,
             unit_propagation_buffer: SmallVec::Empty,
             merged_dependencies: Map::default(),
+            custom_unavailabilities: Map::default(),
         }
     }
 
@@ -285,6 +291,29 @@ impl<DP: DependencyProvider> State<DP> {
                 deps_lookup.push(id);
             }
         }
+
+        if let Kind::Custom(p, vs, metadata) = &self.incompatibility_store[id].kind {
+            // If we have a custom reason, there's a good chance other versions of the package have the same custom reason
+            let deps_lookup = self.custom_unavailabilities.entry(p.clone()).or_default();
+            if let Some((past, merged)) = deps_lookup.as_mut_slice().iter_mut().find_map(|past| {
+                self.incompatibility_store[id]
+                    .merge_dependents(&self.incompatibility_store[*past])
+                    .map(|m| (past, m))
+            }) {
+                let new = self.incompatibility_store.alloc(merged);
+                for (pkg, _) in self.incompatibility_store[new].iter() {
+                    self.incompatibilities
+                        .entry(pkg.clone())
+                        .or_default()
+                        .retain(|id| id != past);
+                }
+                *past = new;
+                id = new;
+            } else {
+                deps_lookup.push(id);
+            }
+        }
+
         for (pkg, term) in self.incompatibility_store[id].iter() {
             if cfg!(debug_assertions) {
                 assert_ne!(term, &crate::term::Term::any());
