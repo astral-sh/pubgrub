@@ -377,7 +377,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
     /// In practice I think it can only produce a conflict if one of the dependencies
     /// (which are used to make the new incompatibilities)
     /// is already in the partial solution with an incompatible version.
-    pub(crate) fn add_version(
+    pub(crate) fn add_package_version_incompatibilities(
         &mut self,
         package: Id<DP::P>,
         version: DP::V,
