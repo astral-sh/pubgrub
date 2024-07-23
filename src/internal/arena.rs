@@ -1,9 +1,9 @@
-use std::{
-    fmt,
-    hash::{Hash, Hasher},
-    marker::PhantomData,
-    ops::{Index, Range},
-};
+use std::fmt;
+use std::hash::{BuildHasherDefault, Hash, Hasher};
+use std::marker::PhantomData;
+use std::ops::{Index, Range};
+
+type FnvIndexSet<K> = indexmap::IndexSet<K, BuildHasherDefault<rustc_hash::FxHasher>>;
 
 /// The index of a value allocated in an arena that holds `T`s.
 ///
@@ -46,6 +46,12 @@ impl<T> fmt::Debug for Id<T> {
             type_name = &type_name[id + 1..]
         }
         write!(f, "Id::<{}>({})", type_name, self.raw)
+    }
+}
+
+impl<T> fmt::Display for Id<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.raw)
     }
 }
 
@@ -124,5 +130,46 @@ impl<T> Index<Range<Id<T>>> for Arena<T> {
     type Output = [T];
     fn index(&self, id: Range<Id<T>>) -> &[T] {
         &self.data[(id.start.raw as usize)..(id.end.raw as usize)]
+    }
+}
+
+/// Yet another index-based arena. This one de-duplicates entries by hashing.
+///
+/// An arena is a kind of simple grow-only allocator, backed by a `Vec`
+/// where all items have the same lifetime, making it easier
+/// to have references between those items.
+/// In this case the `Vec` is inside a `IndexSet` allowing fast lookup by value not just index.
+/// They are all dropped at once when the arena is dropped.
+#[derive(Clone, PartialEq, Eq)]
+pub struct HashArena<T: Hash + Eq> {
+    data: FnvIndexSet<T>,
+}
+
+impl<T: Hash + Eq + fmt::Debug> fmt::Debug for HashArena<T> {
+    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+        fmt.debug_struct("Arena")
+            .field("len", &self.data.len())
+            .field("data", &self.data)
+            .finish()
+    }
+}
+
+impl<T: Hash + Eq> HashArena<T> {
+    pub fn new() -> Self {
+        HashArena {
+            data: FnvIndexSet::default(),
+        }
+    }
+
+    pub fn alloc(&mut self, value: T) -> Id<T> {
+        let (raw, _) = self.data.insert_full(value);
+        Id::from(raw as u32)
+    }
+}
+
+impl<T: Hash + Eq> Index<Id<T>> for HashArena<T> {
+    type Output = T;
+    fn index(&self, id: Id<T>) -> &T {
+        &self.data[id.raw as usize]
     }
 }
