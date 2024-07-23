@@ -85,17 +85,14 @@ impl<DP: DependencyProvider> State<DP> {
     /// Add the dependencies for the current version of the current package as incompatibilities.
     pub fn add_package_version_dependencies(
         &mut self,
-        package: DP::P,
+        package: Id<DP::P>,
         version: DP::V,
         dependencies: impl IntoIterator<Item = (DP::P, DP::VS)>,
     ) {
-        let dep_incompats = self.add_incompatibility_from_dependencies(
-            package.clone(),
-            version.clone(),
-            dependencies,
-        );
+        let dep_incompats =
+            self.add_incompatibility_from_dependencies(package, version.clone(), dependencies);
         self.partial_solution.add_package_version_incompatibilities(
-            package.clone(),
+            package,
             version.clone(),
             dep_incompats,
             &self.incompatibility_store,

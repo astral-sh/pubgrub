@@ -49,6 +49,12 @@ impl<T> fmt::Debug for Id<T> {
     }
 }
 
+impl<T> fmt::Display for Id<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.raw)
+    }
+}
+
 impl<T> Id<T> {
     pub fn into_raw(self) -> usize {
         self.raw as usize

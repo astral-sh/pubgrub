@@ -263,7 +263,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         }
     }
 
-    pub fn prioritized_packages(&self) -> impl Iterator<Item = (&DP::P, &DP::VS)> {
+    pub fn prioritized_packages(&self) -> impl Iterator<Item = (Id<DP::P>, &DP::VS)> {
         let check_all = self.changed_this_decision_level
             == self.current_decision_level.0.saturating_sub(1) as usize;
         let current_decision_level = self.current_decision_level;
@@ -278,7 +278,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                 // or if we backtracked in the mean time.
                 check_all || pa.highest_decision_level == current_decision_level
             })
-            .filter_map(|(p, pa)| pa.assignments_intersection.potential_package_filter(p))
+            .filter_map(|(&p, pa)| pa.assignments_intersection.potential_package_filter(p))
     }
 
     pub fn pick_highest_priority_pkg(
@@ -391,11 +391,11 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         // Check none of the dependencies (new_incompatibilities)
         // would create a conflict (be satisfied).
         if store[new_incompatibilities].iter().all(not_satisfied) {
-            log::info!("add_decision: {:?} @ {}", package, version);
+            log::info!("add_decision: {} @ {}", package, version);
             self.add_decision(package, version);
         } else {
             log::info!(
-                "not adding {:?} @ {} because of its dependencies",
+                "not adding {} @ {} because of its dependencies",
                 package,
                 version
             );

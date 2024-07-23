@@ -62,135 +62,17 @@
 //! If there is no solution, the reason will be provided as clear as possible.
 
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BTreeSet as Set};
+use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use crate::error::PubGrubError;
+pub use crate::internal::arena::Id;
 pub use crate::internal::core::State;
 pub use crate::internal::incompatibility::{Incompatibility, Kind};
-use crate::internal::arena::Id;
 use crate::package::Package;
-use crate::type_aliases::{DependencyConstraints, Map, SelectedDependencies};
+use crate::type_aliases::{DependencyConstraints, Map};
 use crate::version_set::VersionSet;
-use log::{debug, info};
-
-/// Main function of the library.
-/// Finds a set of packages satisfying dependency bounds for a given package + version pair.
-pub fn resolve<DP: DependencyProvider>(
-    dependency_provider: &DP,
-    package: DP::P,
-    version: impl Into<DP::V>,
-) -> Result<SelectedDependencies<DP>, PubGrubError<DP>> {
-    let mut state: State<DP> = State::init(package.clone(), version.into());
-    let mut added_dependencies: Map<Id<DP::P>, Set<DP::V>> = Map::default();
-    let mut next = state.root_package;
-    loop {
-        dependency_provider
-            .should_cancel()
-            .map_err(|err| PubGrubError::ErrorInShouldCancel(err))?;
-
-        info!("unit_propagation: {:?}", &next);
-        state.unit_propagation(next)?;
-
-        debug!(
-            "Partial solution after unit propagation: {}",
-            state.partial_solution
-        );
-
-        let Some(highest_priority_pkg) =
-            state.partial_solution.pick_highest_priority_pkg(|p, r| {
-                dependency_provider.prioritize(&state.package_store[p], r)
-            })
-        else {
-            return Ok(state
-                .partial_solution
-                .extract_solution()
-                .map(|(p, v)| (state.package_store[p].clone(), v))
-                .collect());
-        };
-        next = highest_priority_pkg;
-
-        let term_intersection = state
-            .partial_solution
-            .term_intersection_for_package(next)
-            .ok_or_else(|| {
-                PubGrubError::Failure("a package was chosen but we don't have a term.".into())
-            })?;
-        let decision = dependency_provider
-            .choose_version(
-                &state.package_store[next],
-                term_intersection.unwrap_positive(),
-            )
-            .map_err(PubGrubError::ErrorChoosingPackageVersion)?;
-        info!("DP chose: {:?} @ {:?}", next, decision);
-
-        // Pick the next compatible version.
-        let v = match decision {
-            None => {
-                let inc = Incompatibility::no_versions(next, term_intersection.clone());
-                state.add_incompatibility(inc);
-                continue;
-            }
-            Some(x) => x,
-        };
-
-        if !term_intersection.contains(&v) {
-            return Err(PubGrubError::Failure(
-                "choose_package_version picked an incompatible version".into(),
-            ));
-        }
-
-        let is_new_dependency = added_dependencies
-            .entry(next)
-            .or_default()
-            .insert(v.clone());
-
-        if is_new_dependency {
-            // Retrieve that package dependencies.
-            let p = next;
-            let dependencies = dependency_provider
-                .get_dependencies(&state.package_store[p], &v)
-                .map_err(|err| PubGrubError::ErrorRetrievingDependencies {
-                    package: state.package_store[p].clone(),
-                    version: v.clone(),
-                    source: err,
-                })?;
-
-            let dependencies = match dependencies {
-                Dependencies::Unavailable(reason) => {
-                    state.add_incompatibility(Incompatibility::custom_version(
-                        p,
-                        v.clone(),
-                        reason,
-                    ));
-                    continue;
-                }
-                Dependencies::Available(x) if x.contains_key(&state.package_store[p]) => {
-                    return Err(PubGrubError::SelfDependency {
-                        package: state.package_store[p].clone(),
-                        version: v,
-                    });
-                }
-                Dependencies::Available(x) => x,
-            };
-
-            // Add that package and version if the dependencies are not problematic.
-            let dep_incompats =
-                state.add_incompatibility_from_dependencies(p, v.clone(), dependencies);
-
-            state
-                .partial_solution
-                .add_version(p, v, dep_incompats, &state.incompatibility_store);
-        } else {
-            // `dep_incompats` are already in `incompatibilities` so we know there are not satisfied
-            // terms and can add the decision directly.
-            info!("add_decision (not first time): {:?} @ {}", &next, v);
-            state.partial_solution.add_decision(next, v);
-        }
-    }
-}
 
 /// An enum used by [DependencyProvider] that holds information about package dependencies.
 /// For each [Package] there is a set of versions allowed as a dependency.
