@@ -233,4 +233,7 @@ pub use type_aliases::{DependencyConstraints, Map, SelectedDependencies, Set};
 pub use version::{SemanticVersion, VersionParseError};
 pub use version_set::VersionSet;
 
+// uv-specific additions
+pub use internal::{Incompatibility, Kind, State};
+
 mod internal;
