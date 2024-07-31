@@ -9,8 +9,7 @@ use std::hash::BuildHasherDefault;
 use priority_queue::PriorityQueue;
 use rustc_hash::FxHasher;
 
-use super::small_vec::SmallVec;
-use crate::internal::{Arena, IncompDpId, IncompId, Incompatibility, Relation, SmallMap};
+use crate::internal::{Arena, IncompDpId, IncompId, Incompatibility, Relation, SmallMap, SmallVec};
 use crate::{DependencyProvider, Package, SelectedDependencies, Term, VersionSet};
 
 type FnvIndexMap<K, V> = indexmap::IndexMap<K, V, BuildHasherDefault<FxHasher>>;
@@ -27,7 +26,7 @@ impl DecisionLevel {
 /// The partial solution contains all package assignments,
 /// organized by package and historically ordered.
 #[derive(Clone, Debug)]
-pub(crate) struct PartialSolution<DP: DependencyProvider> {
+pub struct PartialSolution<DP: DependencyProvider> {
     next_global_index: u32,
     current_decision_level: DecisionLevel,
     /// `package_assignments` is primarily a HashMap from a package to its
@@ -158,7 +157,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
     }
 
     /// Add a decision.
-    pub(crate) fn add_decision(&mut self, package: DP::P, version: DP::V) {
+    pub fn add_decision(&mut self, package: DP::P, version: DP::V) {
         // Check that add_decision is never used in the wrong context.
         if cfg!(debug_assertions) {
             match self.package_assignments.get_mut(&package) {
@@ -257,7 +256,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         }
     }
 
-    pub(crate) fn pick_highest_priority_pkg(
+    pub fn pick_highest_priority_pkg(
         &mut self,
         prioritizer: impl Fn(&DP::P, &DP::VS) -> DP::Priority,
     ) -> Option<DP::P> {
@@ -288,7 +287,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
     /// If a partial solution has, for every positive derivation,
     /// a corresponding decision that satisfies that assignment,
     /// it's a total solution and version solving has succeeded.
-    pub(crate) fn extract_solution(&self) -> SelectedDependencies<DP> {
+    pub fn extract_solution(&self) -> SelectedDependencies<DP> {
         self.package_assignments
             .iter()
             .take(self.current_decision_level.0 as usize)
@@ -398,7 +397,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
     }
 
     /// Retrieve intersection of terms related to package.
-    pub(crate) fn term_intersection_for_package(&self, package: &DP::P) -> Option<&Term<DP::VS>> {
+    pub fn term_intersection_for_package(&self, package: &DP::P) -> Option<&Term<DP::VS>> {
         self.package_assignments
             .get(package)
             .map(|pa| pa.assignments_intersection.term())
