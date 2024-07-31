@@ -10,8 +10,11 @@ mod small_map;
 mod small_vec;
 
 pub(crate) use arena::{Arena, Id};
-pub(crate) use core::State;
-pub(crate) use incompatibility::{IncompDpId, IncompId, Incompatibility, Relation};
+pub(crate) use incompatibility::{IncompDpId, IncompId, Relation};
 pub(crate) use partial_solution::{DecisionLevel, PartialSolution, SatisfierSearch};
 pub(crate) use small_map::SmallMap;
 pub(crate) use small_vec::SmallVec;
+
+// uv-specific additions
+pub use core::State;
+pub use incompatibility::{Incompatibility, Kind};
