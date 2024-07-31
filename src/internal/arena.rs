@@ -10,7 +10,7 @@ use std::ops::{Index, Range};
 /// that we actually don't need since it is phantom.
 ///
 /// <https://github.com/rust-lang/rust/issues/26925>
-pub(crate) struct Id<T> {
+pub struct Id<T> {
     raw: u32,
     _ty: PhantomData<fn() -> T>,
 }
@@ -71,7 +71,7 @@ impl<T> Id<T> {
 /// to have references between those items.
 /// They are all dropped at once when the arena is dropped.
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct Arena<T> {
+pub struct Arena<T> {
     data: Vec<T>,
 }
 

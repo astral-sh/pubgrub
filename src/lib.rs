@@ -234,4 +234,7 @@ pub use version_ranges::Ranges;
 pub use version_ranges::Ranges as Range;
 pub use version_set::VersionSet;
 
+// uv-specific additions
+pub use internal::{Incompatibility, Kind, State};
+
 mod internal;
