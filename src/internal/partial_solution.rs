@@ -313,6 +313,25 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
     }
 
     #[cold]
+    pub fn prioritized_packages(&self) -> impl Iterator<Item = (Id<DP::P>, &DP::VS)> {
+        let check_all = self.prioritize_decision_level
+            == self.current_decision_level.0.saturating_sub(1) as usize;
+        let current_decision_level = self.current_decision_level;
+        self.package_assignments
+            .get_range(self.prioritize_decision_level..)
+            .unwrap()
+            .iter()
+            .filter(move |(_, pa)| {
+                // We only actually need to update the package if its Been changed
+                // since the last time we called prioritize.
+                // Which means it's highest decision level is the current decision level,
+                // or if we backtracked in the mean time.
+                check_all || pa.highest_decision_level == current_decision_level
+            })
+            .filter_map(|(&p, pa)| pa.assignments_intersection.potential_package_filter(p))
+    }
+
+    #[cold]
     pub fn pick_highest_priority_pkg(
         &mut self,
         mut prioritizer: impl FnMut(Id<DP::P>, &DP::VS) -> DP::Priority,
