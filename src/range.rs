@@ -310,6 +310,8 @@ impl<V: Ord> Range<V> {
 
 /// Implementing `PartialOrd` for start `Bound` of an interval.
 ///
+/// Legend: `∞` is unbounded, `[1,2]` is `>1,<2`, `]1,2[` is `>=1,<=2`.
+///
 /// ```text
 /// left:   ∞-------]
 /// right:    [-----]
@@ -345,8 +347,10 @@ fn cmp_bounds_start<V: PartialOrd>(left: Bound<&V>, right: Bound<&V>) -> Option<
 ///
 /// We flip the unbounded ranges from `-∞` to `∞`, while `V`-valued bounds checks remain the same.
 ///
+/// Legend: `∞` is unbounded, `[1,2]` is `>1,<2`, `]1,2[` is `>=1,<=2`.
+///
 /// ```text
-/// left:   [--------inf
+/// left:   [--------∞
 /// right:  [-----]
 /// left is greater, since it starts earlier.
 ///
