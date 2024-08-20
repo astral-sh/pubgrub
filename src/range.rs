@@ -238,9 +238,9 @@ impl<V: Ord> Range<V> {
     /// The `versions` iterator must be sorted.
     /// Functionally equivalent to `versions.map(|v| self.contains(v))`.
     /// Except it runs in `O(size_of_range + len_of_versions)` not `O(size_of_range * len_of_versions)`
-    pub fn contains_many<'s, I, BV>(&'s self, versions: I) -> impl Iterator<Item = bool> + 's
+    pub fn contains_many<'s, I, BV>(&'s self, versions: I) -> impl Iterator<Item=bool> + 's
     where
-        I: Iterator<Item = BV> + 's,
+        I: Iterator<Item=BV> + 's,
         BV: Borrow<V> + 's,
     {
         #[cfg(debug_assertions)]
@@ -363,13 +363,13 @@ fn cmp_bounds_end<V: PartialOrd>(left: Bound<&V>, right: Bound<&V>) -> Option<Or
         (Included(left), Included(right)) => left.partial_cmp(right),
         (Excluded(left), Included(right)) => match left.partial_cmp(right)? {
             Ordering::Less => Some(Ordering::Less),
-            Ordering::Equal => Some(Ordering::Greater),
+            Ordering::Equal => Some(Ordering::Less),
             Ordering::Greater => Some(Ordering::Greater),
         },
         (Unbounded, Excluded(_right)) => Some(Ordering::Greater),
         (Included(left), Excluded(right)) => match left.partial_cmp(right)? {
             Ordering::Less => Some(Ordering::Less),
-            Ordering::Equal => Some(Ordering::Less),
+            Ordering::Equal => Some(Ordering::Greater),
             Ordering::Greater => Some(Ordering::Greater),
         },
         (Excluded(left), Excluded(right)) => left.partial_cmp(right),
@@ -499,8 +499,8 @@ fn left_end_is_smaller<V: PartialOrd>(left: Bound<V>, right: Bound<V>) -> bool {
 /// [None, 1, 4, 7, None, None, None, 8, None, 9] -> [(1, 7), (8, 8), (9, None)]
 /// ```
 fn group_adjacent_locations(
-    mut locations: impl Iterator<Item = Option<usize>>,
-) -> impl Iterator<Item = (Option<usize>, Option<usize>)> {
+    mut locations: impl Iterator<Item=Option<usize>>,
+) -> impl Iterator<Item=(Option<usize>, Option<usize>)> {
     // If the first version matched, then the lower bound of that segment is not needed
     let mut seg = locations.next().flatten().map(|ver| (None, Some(ver)));
     std::iter::from_fn(move || {
@@ -716,7 +716,7 @@ impl<V: Ord + Clone> Range<V> {
     /// If the given versions are not sorted the correctness of this function is not guaranteed.
     pub fn simplify<'s, I, BV>(&self, versions: I) -> Self
     where
-        I: Iterator<Item = BV> + 's,
+        I: Iterator<Item=BV> + 's,
         BV: Borrow<V> + 's,
     {
         // Do not simplify singletons
@@ -766,7 +766,7 @@ impl<V: Ord + Clone> Range<V> {
     /// start of the first and the end of the second.
     fn keep_segments(
         &self,
-        kept_segments: impl Iterator<Item = (Option<usize>, Option<usize>)>,
+        kept_segments: impl Iterator<Item=(Option<usize>, Option<usize>)>,
     ) -> Range<V> {
         let mut segments = SmallVec::Empty;
         for (s, e) in kept_segments {
@@ -779,7 +779,7 @@ impl<V: Ord + Clone> Range<V> {
     }
 
     /// Iterate over the parts of the range.
-    pub fn iter(&self) -> impl Iterator<Item = (&Bound<V>, &Bound<V>)> {
+    pub fn iter(&self) -> impl Iterator<Item=(&Bound<V>, &Bound<V>)> {
         self.segments.iter().map(|(start, end)| (start, end))
     }
 }
@@ -899,7 +899,7 @@ pub mod tests {
 
     /// Generate version sets from a random vector of deltas between bounds.
     /// Each bound is randomly inclusive or exclusive.
-    pub fn strategy() -> impl Strategy<Value = Range<u32>> {
+    pub fn strategy() -> impl Strategy<Value=Range<u32>> {
         (
             any::<bool>(),
             prop::collection::vec(any::<(u32, bool)>(), 1..10),
@@ -961,7 +961,7 @@ pub mod tests {
             })
     }
 
-    fn version_strat() -> impl Strategy<Value = u32> {
+    fn version_strat() -> impl Strategy<Value=u32> {
         any::<u32>()
     }
 
@@ -1162,5 +1162,27 @@ pub mod tests {
             range.simplify(versions.iter()),
             range.simplify(versions.into_iter())
         );
+    }
+
+    #[test]
+    fn version_ord() {
+        let versions: &[Range<u32>] = &[
+            Range::strictly_lower_than(1u32),
+            Range::lower_than(1u32),
+            Range::singleton(1u32),
+            Range::between(1u32, 3u32),
+            Range::higher_than(1u32),
+            Range::strictly_higher_than(1u32),
+            Range::singleton(2u32),
+            Range::singleton(2u32).union(&Range::singleton(3u32)),
+            Range::singleton(2u32)
+                .union(&Range::singleton(3u32))
+                .union(&Range::singleton(4u32)),
+            Range::singleton(2u32).union(&Range::singleton(4u32)),
+            Range::singleton(3u32),
+        ];
+        let mut versions_sorted = versions.to_vec();
+        versions_sorted.sort();
+        assert_eq!(versions_sorted, versions);
     }
 }
