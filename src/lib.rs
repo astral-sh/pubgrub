@@ -40,7 +40,8 @@
 //!
 //! We can model that scenario with this library as follows
 //! ```
-//! # use pubgrub::{OfflineDependencyProvider, resolve, Range};
+//! # use pubgrub::{OfflineDependencyProvider, resolve};
+//! # use version_range::Range;
 //!
 //! type NumVS = Range<u32>;
 //!
@@ -71,10 +72,11 @@
 //! and [SemanticVersion] for versions.
 //! This may be done quite easily by implementing the three following functions.
 //! ```
-//! # use pubgrub::{DependencyProvider, Dependencies, SemanticVersion,Range, DependencyConstraints, Map};
+//! # use pubgrub::{DependencyProvider, Dependencies, SemanticVersion, DependencyConstraints, Map};
 //! # use std::error::Error;
 //! # use std::borrow::Borrow;
 //! # use std::convert::Infallible;
+//! # use version_range::Range;
 //! #
 //! # struct MyDependencyProvider;
 //! #
@@ -172,7 +174,8 @@
 //! [DefaultStringReporter] that outputs the report as a [String].
 //! You may use it as follows:
 //! ```
-//! # use pubgrub::{resolve, OfflineDependencyProvider, DefaultStringReporter, Reporter, PubGrubError, Range};
+//! # use pubgrub::{resolve, OfflineDependencyProvider, DefaultStringReporter, Reporter, PubGrubError};
+//! # use version_range::Range;
 //! #
 //! # type NumVS = Range<u32>;
 //! #
@@ -212,7 +215,6 @@
 
 mod error;
 mod package;
-mod range;
 mod report;
 mod solver;
 mod term;
@@ -222,7 +224,6 @@ mod version_set;
 
 pub use error::{NoSolutionError, PubGrubError};
 pub use package::Package;
-pub use range::Range;
 pub use report::{
     DefaultStringReportFormatter, DefaultStringReporter, DerivationTree, Derived, External,
     ReportFormatter, Reporter,

@@ -35,7 +35,8 @@
 //!
 //! ```
 //! # use std::convert::Infallible;
-//! # use pubgrub::{resolve, OfflineDependencyProvider, PubGrubError, Range};
+//! # use pubgrub::{resolve, OfflineDependencyProvider, PubGrubError};
+//! # use version_range::Range;
 //! #
 //! # type NumVS = Range<u32>;
 //! #

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use pubgrub::{
-    resolve, DefaultStringReporter, Map, OfflineDependencyProvider, PubGrubError, Range,
-    Reporter as _, SemanticVersion, Set,
+    resolve, DefaultStringReporter, Map, OfflineDependencyProvider, PubGrubError, Reporter as _,
+    SemanticVersion, Set,
 };
 
 type NumVS = Range<u32>;
@@ -11,6 +11,7 @@ type SemVS = Range<SemanticVersion>;
 use std::io::Write;
 
 use log::LevelFilter;
+use version_range::Range;
 
 fn init_log() {
     let _ = env_logger::builder()

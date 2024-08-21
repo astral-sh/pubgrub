@@ -357,11 +357,10 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Display
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use proptest::prelude::*;
-
     use super::*;
     use crate::term::tests::strategy as term_strat;
-    use crate::Range;
+    use proptest::prelude::*;
+    use version_range::Range;
 
     proptest! {
 

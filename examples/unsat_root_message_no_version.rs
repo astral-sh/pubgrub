@@ -4,8 +4,9 @@ use std::fmt::{self, Display};
 
 use pubgrub::{
     resolve, DefaultStringReporter, Derived, External, Map, OfflineDependencyProvider,
-    PubGrubError, Range, ReportFormatter, Reporter, SemanticVersion, Term,
+    PubGrubError, ReportFormatter, Reporter, SemanticVersion, Term,
 };
+use version_range::Range;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Package {

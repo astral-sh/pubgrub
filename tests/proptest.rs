@@ -11,13 +11,12 @@ use proptest::prelude::*;
 use proptest::sample::Index;
 use proptest::string::string_regex;
 
+use crate::sat_dependency_provider::SatResolve;
 use pubgrub::{
     resolve, DefaultStringReporter, Dependencies, DependencyProvider, DerivationTree, External,
-    OfflineDependencyProvider, Package, PubGrubError, Range, Reporter, SelectedDependencies,
-    VersionSet,
+    OfflineDependencyProvider, Package, PubGrubError, Reporter, SelectedDependencies, VersionSet,
 };
-
-use crate::sat_dependency_provider::SatResolve;
+use version_range::Range;
 
 mod sat_dependency_provider;
 

@@ -2,7 +2,8 @@
 
 use std::cell::RefCell;
 
-use pubgrub::{resolve, Dependencies, DependencyProvider, OfflineDependencyProvider, Range};
+use pubgrub::{resolve, Dependencies, DependencyProvider, OfflineDependencyProvider};
+use version_range::Range;
 
 type NumVS = Range<u32>;
 

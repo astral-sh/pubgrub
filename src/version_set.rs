@@ -19,6 +19,7 @@
 //! return canonical representations so be careful there.
 
 use std::fmt::{Debug, Display};
+use version_range::Range;
 
 /// Trait describing sets of versions.
 pub trait VersionSet: Debug + Display + Clone + Eq {
@@ -66,5 +67,45 @@ pub trait VersionSet: Debug + Display + Clone + Eq {
     /// Whether all range of `self` are contained in `other`.
     fn subset_of(&self, other: &Self) -> bool {
         self == &self.intersection(other)
+    }
+}
+
+impl<T: Debug + Display + Clone + Eq + Ord> VersionSet for Range<T> {
+    type V = T;
+
+    fn empty() -> Self {
+        Range::empty()
+    }
+
+    fn singleton(v: Self::V) -> Self {
+        Range::singleton(v)
+    }
+
+    fn complement(&self) -> Self {
+        Range::complement(self)
+    }
+
+    fn intersection(&self, other: &Self) -> Self {
+        Range::intersection(self, other)
+    }
+
+    fn contains(&self, v: &Self::V) -> bool {
+        Range::contains(self, v)
+    }
+
+    fn full() -> Self {
+        Range::full()
+    }
+
+    fn union(&self, other: &Self) -> Self {
+        Range::union(self, other)
+    }
+
+    fn is_disjoint(&self, other: &Self) -> bool {
+        Range::is_disjoint(self, other)
+    }
+
+    fn subset_of(&self, other: &Self) -> bool {
+        Range::subset_of(self, other)
     }
 }
