@@ -1188,5 +1188,11 @@ pub mod tests {
         let mut versions_sorted = versions.to_vec();
         versions_sorted.sort();
         assert_eq!(versions_sorted, versions);
+
+        // Check that the sorting isn't just stable because we're returning equal.
+        let mut version_reverse_sorted = versions.to_vec();
+        version_reverse_sorted.reverse();
+        version_reverse_sorted.sort();
+        assert_eq!(version_reverse_sorted, versions);
     }
 }
