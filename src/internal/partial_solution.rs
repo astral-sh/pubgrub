@@ -46,6 +46,7 @@ pub struct PartialSolution<DP: DependencyProvider> {
     prioritized_potential_packages:
         PriorityQueue<DP::P, DP::Priority, BuildHasherDefault<FxHasher>>,
     changed_this_decision_level: usize,
+    has_ever_backtracked: bool,
 }
 
 impl<DP: DependencyProvider> Display for PartialSolution<DP> {
@@ -151,6 +152,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             package_assignments: FnvIndexMap::default(),
             prioritized_potential_packages: PriorityQueue::default(),
             changed_this_decision_level: 0,
+            has_ever_backtracked: false,
         }
     }
 
@@ -355,6 +357,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         // Throw away all stored priority levels, And mark that they all need to be recomputed.
         self.prioritized_potential_packages.clear();
         self.changed_this_decision_level = self.current_decision_level.0.saturating_sub(1) as usize;
+        self.has_ever_backtracked = true;
     }
 
     /// We can add the version to the partial solution as a decision
@@ -369,28 +372,37 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         new_incompatibilities: std::ops::Range<IncompId<DP::P, DP::VS, DP::M>>,
         store: &Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
     ) {
-        let exact = Term::exact(version.clone());
-        let not_satisfied = |incompat: &Incompatibility<DP::P, DP::VS, DP::M>| {
-            incompat.relation(|p| {
-                if p == &package {
-                    Some(&exact)
-                } else {
-                    self.term_intersection_for_package(p)
-                }
-            }) != Relation::Satisfied
-        };
-
-        // Check none of the dependencies (new_incompatibilities)
-        // would create a conflict (be satisfied).
-        if store[new_incompatibilities].iter().all(not_satisfied) {
-            log::info!("add_decision: {} @ {}", package, version);
+        if !self.has_ever_backtracked {
+            // Nothing has yet gone wrong during this resolution. This call is unlikely to be the first problem.
+            // So let's live with a little bit of risk and add the decision without checking the dependencies.
+            // The worst that can happen is we will have to do a full backtrack which only removes this one decision.
+            log::info!("add_decision: {package} @ {version} without checking dependencies");
             self.add_decision(package, version);
         } else {
-            log::info!(
-                "not adding {} @ {} because of its dependencies",
-                package,
-                version
-            );
+            // Check if any of the new dependencies preclude deciding on this crate version.
+            let exact = Term::exact(version.clone());
+            let not_satisfied = |incompat: &Incompatibility<DP::P, DP::VS, DP::M>| {
+                incompat.relation(|p| {
+                    if p == &package {
+                        Some(&exact)
+                    } else {
+                        self.term_intersection_for_package(p)
+                    }
+                }) != Relation::Satisfied
+            };
+
+            // Check none of the dependencies (new_incompatibilities)
+            // would create a conflict (be satisfied).
+            if store[new_incompatibilities].iter().all(not_satisfied) {
+                log::info!("add_decision: {} @ {}", package, version);
+                self.add_decision(package, version);
+            } else {
+                log::info!(
+                    "not adding {} @ {} because of its dependencies",
+                    package,
+                    version
+                );
+            }
         }
     }
 
@@ -492,10 +504,14 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
 
         satisfied_map.insert(
             satisfier_package,
-            satisfier_pa.satisfier(
-                satisfier_package,
-                &accum_term.intersection(&incompat_term.negate()),
-            ),
+            if accum_term.subset_of(incompat_term) {
+                (None, 0, DecisionLevel(1))
+            } else {
+                satisfier_pa.satisfier(
+                    satisfier_package,
+                    &accum_term.intersection(&incompat_term.negate()),
+                )
+            },
         );
 
         // Finally, let's identify the decision level of that previous satisfier.
@@ -517,14 +533,16 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> PackageAssignm
         package: &P,
         start_term: &Term<VS>,
     ) -> (Option<IncompId<P, VS, M>>, u32, DecisionLevel) {
-        let empty = Term::empty();
         // Indicate if we found a satisfier in the list of derivations, otherwise it will be the decision.
         let idx = self
             .dated_derivations
             .as_slice()
             .partition_point(|dd| !dd.accumulated_intersection.is_disjoint(start_term));
         if let Some(dd) = self.dated_derivations.get(idx) {
-            debug_assert_eq!(dd.accumulated_intersection.intersection(start_term), empty);
+            debug_assert_eq!(
+                dd.accumulated_intersection.intersection(start_term),
+                Term::empty()
+            );
             return (Some(dd.cause), dd.global_index, dd.decision_level);
         }
         // If it wasn't found in the derivations,
