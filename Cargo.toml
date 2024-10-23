@@ -34,6 +34,12 @@ varisat = "0.2.2"
 criterion = "0.5"
 env_logger = "0.11.5"
 
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = "full"
+lto = false
+
 [[bench]]
 name = "large_case"
 harness = false
