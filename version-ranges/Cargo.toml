@@ -1,11 +1,12 @@
 [package]
 name = "version-ranges"
-version = "0.1.0"
+version = "0.1.1"
 description = "Performance-optimized type for generic version ranges and operations on them."
 edition = "2021"
 repository = "https://github.com/pubgrub-rs/pubgrub"
 license = "MPL-2.0"
 keywords = ["version", "pubgrub", "selector", "ranges"]
+include = ["ranges.png", "src"]
 
 [dependencies]
 proptest = { version = "1.5.0", optional = true }
