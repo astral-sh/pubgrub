@@ -1,6 +1,7 @@
 [package]
 name = "version-ranges"
 version = "0.1.0"
+description = "Performance-optimized type for generic version ranges and operations on them."
 edition = "2021"
 repository = "https://github.com/pubgrub-rs/pubgrub"
 license = "MPL-2.0"
