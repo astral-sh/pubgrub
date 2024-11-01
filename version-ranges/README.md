@@ -28,7 +28,7 @@ The optimized operations include `complement`, `contains`, `contains_many`, `int
 coordinates, not just version ranges. While built as a performance-critical piece
 of [pubgrub](https://github.com/pubgrub-rs/pubgrub), it can be adopted for other domains, too.
 
-![A number line and a sample range on it](ranges.png)
+![A number line and a sample range on it](number-line-ranges.svg)
 
 You can imagine a `Ranges` as slices over a number line.
 
