@@ -824,6 +824,11 @@ impl<V: Ord + Clone> Ranges<V> {
     pub fn iter(&self) -> impl Iterator<Item = (&Bound<V>, &Bound<V>)> {
         self.segments.iter().map(|(start, end)| (start, end))
     }
+
+    /// Iterate over the parts of the range.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&mut Bound<V>, &mut Bound<V>)> {
+        self.segments.iter_mut().map(|(start, end)| (start, end))
+    }
 }
 
 // REPORT ######################################################################
