@@ -46,6 +46,17 @@ use proptest::prelude::*;
 use smallvec::{smallvec, SmallVec};
 
 /// Ranges represents multiple intervals of a continuous range of monotone increasing values.
+///
+/// Internally, [`Ranges`] are an ordered list of segments, where segment is a bounds pair.
+///
+/// Invariants:
+/// 1. The segments are sorted, from lowest to highest (through `Ord`).
+/// 2. Each segment contains at least one version (start < end).
+/// 3. There is at least one version between two segments.
+///
+/// These ensure that equivalent instances have an identical representation, which is important
+/// for `Eq` and `Hash`. Given that this type doesn't know the lower bound, upper bound, granularity
+/// or actual instances of `V`, this applies only to equality under pubgrub's model.
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
