@@ -846,6 +846,27 @@ impl<V: Ord + Clone> Ranges<V> {
     }
 }
 
+// Newtype to avoid leaking our internal representation.
+pub struct RangesIter<V>(smallvec::IntoIter<[Interval<V>; 1]>);
+
+impl<V> Iterator for RangesIter<V> {
+    type Item = Interval<V>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
+impl<V> IntoIterator for Ranges<V> {
+    type Item = (Bound<V>, Bound<V>);
+    // Newtype to avoid leaking our internal representation.
+    type IntoIter = RangesIter<V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        RangesIter(self.segments.into_iter())
+    }
+}
+
 // REPORT ######################################################################
 
 impl<V: Display + Eq> Display for Ranges<V> {
