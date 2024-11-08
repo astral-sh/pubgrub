@@ -1,29 +1,31 @@
 //! A sudoku solver.
+//!
+//! Uses `Arc<usize>` for being closer to real versions.
 // SPDX-License-Identifier: MPL-2.0
-
-use std::fmt;
 
 use pubgrub::{
     resolve, DefaultStringReporter, OfflineDependencyProvider, PubGrubError, Range, Reporter,
     SelectedDependencies,
 };
+use std::fmt;
+use std::sync::Arc;
 use version_ranges::Ranges;
 
 use criterion::*;
 
 /// The size of a box in the board.
-const BOARD_BASE: u8 = 3;
+const BOARD_BASE: usize = 3;
 /// The size of the board.
-const BOARD_SIZE: u8 = BOARD_BASE * BOARD_BASE;
+const BOARD_SIZE: usize = BOARD_BASE * BOARD_BASE;
 
-type DP = OfflineDependencyProvider<SudokuPackage, Range<u8>>;
+type DP = OfflineDependencyProvider<SudokuPackage, Range<Arc<usize>>>;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 enum SudokuPackage {
     /// Add all known fields.
     Root,
     /// Version is the value of the cell.
-    Cell { row: u8, col: u8 },
+    Cell { row: usize, col: usize },
 }
 
 impl fmt::Display for SudokuPackage {
@@ -37,7 +39,7 @@ impl fmt::Display for SudokuPackage {
     }
 }
 
-fn from_board(b: &str) -> Vec<(SudokuPackage, Range<u8>)> {
+fn from_board(b: &str) -> Vec<(SudokuPackage, Range<Arc<usize>>)> {
     let mut out = vec![];
     for (row, line) in b
         .trim()
@@ -57,7 +59,7 @@ fn from_board(b: &str) -> Vec<(SudokuPackage, Range<u8>)> {
                         row: (row + 1).try_into().unwrap(),
                         col: (col + 1).try_into().unwrap(),
                     },
-                    Range::singleton(val as u8),
+                    Range::singleton(val as usize),
                 ));
             }
         }
@@ -67,7 +69,7 @@ fn from_board(b: &str) -> Vec<(SudokuPackage, Range<u8>)> {
 
 /// Encode all the exclusions from assigning a cell to a value
 fn encode_constraints(
-    dependency_provider: &mut OfflineDependencyProvider<SudokuPackage, Ranges<u8>>,
+    dependency_provider: &mut OfflineDependencyProvider<SudokuPackage, Ranges<Arc<usize>>>,
 ) {
     for row in 1..=BOARD_SIZE {
         for col in 1..=BOARD_SIZE {
@@ -80,7 +82,7 @@ fn encode_constraints(
                     }
                     deps.push((
                         SudokuPackage::Cell { row: row_, col },
-                        Range::singleton(val).complement(),
+                        Range::singleton(Arc::new(val)).complement(),
                     ))
                 }
                 // A number may only occur once in a col
@@ -90,7 +92,7 @@ fn encode_constraints(
                     }
                     deps.push((
                         SudokuPackage::Cell { row, col: col_ },
-                        Range::singleton(val).complement(),
+                        Range::singleton(Arc::new(val)).complement(),
                     ))
                 }
                 // A number may only occur once in a box
@@ -106,7 +108,7 @@ fn encode_constraints(
                                 row: row_,
                                 col: col_,
                             },
-                            Range::singleton(val).complement(),
+                            Range::singleton(Arc::new(val)).complement(),
                         ))
                     }
                 }
@@ -117,11 +119,11 @@ fn encode_constraints(
     }
 }
 
-fn solve(board: Vec<(SudokuPackage, Ranges<u8>)>) -> SelectedDependencies<DP> {
+fn solve(board: Vec<(SudokuPackage, Ranges<Arc<usize>>)>) -> SelectedDependencies<DP> {
     let mut dependency_provider = DP::new();
     encode_constraints(&mut dependency_provider);
-    dependency_provider.add_dependencies(SudokuPackage::Root, 1, board);
-    match resolve(&dependency_provider, SudokuPackage::Root, 1) {
+    dependency_provider.add_dependencies(SudokuPackage::Root, Arc::new(1usize), board);
+    match resolve(&dependency_provider, SudokuPackage::Root, Arc::new(1usize)) {
         Ok(sol) => sol,
         Err(PubGrubError::NoSolution(mut derivation_tree)) => {
             derivation_tree.collapse_no_versions();
