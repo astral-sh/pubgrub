@@ -283,6 +283,7 @@ impl<V: Ord> Ranges<V> {
         }
     }
 
+    /// See `Ranges` docstring for the invariants.
     fn check_invariants(self) -> Self {
         if cfg!(debug_assertions) {
             for p in self.segments.as_slice().windows(2) {
@@ -823,6 +824,27 @@ impl<V: Ord + Clone> Ranges<V> {
     /// Iterate over the parts of the range.
     pub fn iter(&self) -> impl Iterator<Item = (&Bound<V>, &Bound<V>)> {
         self.segments.iter().map(|(start, end)| (start, end))
+    }
+}
+
+// Newtype to avoid leaking our internal representation.
+pub struct RangesIter<V>(smallvec::IntoIter<[Interval<V>; 1]>);
+
+impl<V> Iterator for RangesIter<V> {
+    type Item = Interval<V>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
+}
+
+impl<V> IntoIterator for Ranges<V> {
+    type Item = (Bound<V>, Bound<V>);
+    // Newtype to avoid leaking our internal representation.
+    type IntoIter = RangesIter<V>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        RangesIter(self.segments.into_iter())
     }
 }
 
