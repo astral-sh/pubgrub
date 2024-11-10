@@ -855,6 +855,18 @@ impl<V> Iterator for RangesIter<V> {
     fn next(&mut self) -> Option<Self::Item> {
         self.0.next()
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.0.len(), Some(self.0.len()))
+    }
+}
+
+impl<V> ExactSizeIterator for RangesIter<V> {}
+
+impl<V> DoubleEndedIterator for RangesIter<V> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        self.0.next_back()
+    }
 }
 
 impl<V> IntoIterator for Ranges<V> {
