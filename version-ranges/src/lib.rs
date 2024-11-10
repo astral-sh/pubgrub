@@ -55,8 +55,16 @@ use smallvec::{smallvec, SmallVec};
 /// 3. There is at least one version between two segments.
 ///
 /// These ensure that equivalent instances have an identical representation, which is important
-/// for `Eq` and `Hash`. Given that this type doesn't know the lower bound, upper bound, granularity
-/// or actual instances of `V`, this applies only to equality under pubgrub's model.
+/// for `Eq` and `Hash`. Note that this representation cannot strictly guaranty equality of
+/// [`Ranges`] with equality of its representation without also knowing the nature of the underlying
+/// versions. In particular, if the version space is discrete, different representations, using
+/// different types of bounds (exclusive/inclusive) may correspond to the same set of existing
+/// versions. It is a tradeoff we acknowledge, but which makes representations of continuous version
+/// sets more accessible, to better handle features like pre-releases and other types of version
+/// modifiers. For example, `[(Included(3u32), Excluded(7u32))]` and
+/// `[(Included(3u32), Included(6u32))]` refer to the same version set, since there is no version
+/// between 6 and 7, which this crate doesn't know about.
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
