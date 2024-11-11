@@ -46,6 +46,25 @@ use proptest::prelude::*;
 use smallvec::{smallvec, SmallVec};
 
 /// Ranges represents multiple intervals of a continuous range of monotone increasing values.
+///
+/// Internally, [`Ranges`] are an ordered list of segments, where segment is a bounds pair.
+///
+/// Invariants:
+/// 1. The segments are sorted, from lowest to highest (through `Ord`).
+/// 2. Each segment contains at least one version (start < end).
+/// 3. There is at least one version between two segments.
+///
+/// These ensure that equivalent instances have an identical representation, which is important
+/// for `Eq` and `Hash`. Note that this representation cannot strictly guaranty equality of
+/// [`Ranges`] with equality of its representation without also knowing the nature of the underlying
+/// versions. In particular, if the version space is discrete, different representations, using
+/// different types of bounds (exclusive/inclusive) may correspond to the same set of existing
+/// versions. It is a tradeoff we acknowledge, but which makes representations of continuous version
+/// sets more accessible, to better handle features like pre-releases and other types of version
+/// modifiers. For example, `[(Included(3u32), Excluded(7u32))]` and
+/// `[(Included(3u32), Included(6u32))]` refer to the same version set, since there is no version
+/// between 6 and 7, which this crate doesn't know about.
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
@@ -283,6 +302,7 @@ impl<V: Ord> Ranges<V> {
         }
     }
 
+    /// See [`Ranges`] for the invariants checked.
     fn check_invariants(self) -> Self {
         if cfg!(debug_assertions) {
             for p in self.segments.as_slice().windows(2) {
