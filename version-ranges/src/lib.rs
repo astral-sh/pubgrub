@@ -879,6 +879,186 @@ impl<V> IntoIterator for Ranges<V> {
     }
 }
 
+impl<V: Ord> FromIterator<(Bound<V>, Bound<V>)> for Ranges<V> {
+    /// Constructor from arbitrary, unsorted and potentially overlapping ranges.
+    ///
+    /// This is equivalent, but faster, to computing the [`Ranges::union`] of the
+    /// [`Ranges::from_range_bounds`] of each segment.
+    fn from_iter<T: IntoIterator<Item = (Bound<V>, Bound<V>)>>(iter: T) -> Self {
+        // We have three constraints we need to fulfil:
+        // 1. The segments are sorted, from lowest to highest (through `Ord`): By sorting.
+        // 2. Each segment contains at least one version (start < end): By skipping invalid
+        //    segments.
+        // 3. There is at least one version between two segments: By merging overlapping elements.
+        //
+        // Technically, the implementation has a O(n²) worst case complexity since we're inserting
+        // and removing. This has two motivations: One is that we don't have any performance
+        // critical usages of this method as of this writing, so we have no real world benchmark.
+        // The other is that we get the elements from an iterator, so to avoid moving elements
+        // around we would first need to build a different, sorted collection with extra
+        // allocation(s), before we could build our real segments. --Konsti
+
+        // For this implementation, we choose to only build a single smallvec and insert or remove
+        // in it, instead of e.g. collecting the segments into a sorted datastructure first and then
+        // construction the second smallvec without shifting.
+        let mut segments: SmallVec<[Interval<V>; 1]> = SmallVec::new();
+
+        for segment in iter {
+            if !valid_segment(&segment.start_bound(), &segment.end_bound()) {
+                continue;
+            }
+            // Find where to insert the new segment
+            let insertion_point = segments.partition_point(|elem: &Interval<V>| {
+                cmp_bounds_start(elem.start_bound(), segment.start_bound())
+                    .unwrap()
+                    .is_lt()
+            });
+            // Is it overlapping with the previous segment?
+            let previous_overlapping = insertion_point > 0
+                && !end_before_start_with_gap(
+                    &segments[insertion_point - 1].end_bound(),
+                    &segment.start_bound(),
+                );
+
+            // Is it overlapping with the following segment? We'll check if there's more than one
+            // overlap later.
+            let next_overlapping = insertion_point < segments.len()
+                && !end_before_start_with_gap(
+                    &segment.end_bound(),
+                    &segments[insertion_point].start_bound(),
+                );
+
+            match (previous_overlapping, next_overlapping) {
+                (true, true) => {
+                    // previous:  |------|
+                    // segment:       |------|
+                    // following:          |------|
+                    // final:     |---------------|
+                    //
+                    // OR
+                    //
+                    // previous:  |------|
+                    // segment:       |-----------|
+                    // following:          |----|
+                    // final:     |---------------|
+                    //
+                    // OR
+                    //
+                    // previous:  |------|
+                    // segment:       |----------------|
+                    // following:          |----|   |------|
+                    // final:     |------------------------|
+                    // We merge all three segments into one, which is effectively removing one of
+                    // two previously inserted and changing the bounds on the other.
+
+                    // Remove all elements covered by the final element
+                    let mut following = segments.remove(insertion_point);
+                    while insertion_point < segments.len()
+                        && !end_before_start_with_gap(
+                            &segment.end_bound(),
+                            &segments[insertion_point].start_bound(),
+                        )
+                    {
+                        following = segments.remove(insertion_point);
+                    }
+
+                    // Set end to max(segment.end, <last overlapping segment>.end)
+                    if cmp_bounds_end(segment.end_bound(), following.end_bound())
+                        .unwrap()
+                        .is_lt()
+                    {
+                        segments[insertion_point - 1].1 = following.1;
+                    } else {
+                        segments[insertion_point - 1].1 = segment.1;
+                    }
+                }
+                (true, false) => {
+                    // previous:  |------|
+                    // segment:       |------|
+                    // following:                |------|
+                    //
+                    // OR
+                    //
+                    // previous:  |----------|
+                    // segment:       |---|
+                    // following:                |------|
+                    //
+                    // final:     |----------|   |------|
+                    // We can reuse the existing element by extending it.
+
+                    // Set end to max(segment.end, <previous>.end)
+                    if cmp_bounds_end(
+                        segments[insertion_point - 1].end_bound(),
+                        segment.end_bound(),
+                    )
+                    .unwrap()
+                    .is_lt()
+                    {
+                        segments[insertion_point - 1].1 = segment.1;
+                    }
+                }
+                (false, true) => {
+                    // previous:  |------|
+                    // segment:             |------|
+                    // following:               |------|
+                    // final:    |------|   |----------|
+                    //
+                    // OR
+                    //
+                    // previous:  |------|
+                    // segment:             |----------|
+                    // following:               |---|
+                    // final:    |------|   |----------|
+                    //
+                    // OR
+                    //
+                    // previous:  |------|
+                    // segment:             |------------|
+                    // following:               |---|  |------|
+                    //
+                    // final:    |------|   |-----------------|
+                    // We can reuse the existing element by extending it.
+
+                    // Remove all fully covered segments so the next element is the last one that
+                    // overlaps.
+                    while insertion_point + 1 < segments.len()
+                        && !end_before_start_with_gap(
+                            &segment.end_bound(),
+                            &segments[insertion_point + 1].start_bound(),
+                        )
+                    {
+                        // We know that the one after also overlaps, so we can drop the current
+                        // following.
+                        segments.remove(insertion_point);
+                    }
+
+                    // Set end to max(segment.end, <last overlapping segment>.end)
+                    if cmp_bounds_end(segments[insertion_point].end_bound(), segment.end_bound())
+                        .unwrap()
+                        .is_lt()
+                    {
+                        segments[insertion_point].1 = segment.1;
+                    }
+                    segments[insertion_point].0 = segment.0;
+                }
+                (false, false) => {
+                    // previous:  |------|
+                    // segment:             |------|
+                    // following:                      |------|
+                    //
+                    // final:    |------|   |------|   |------|
+
+                    // This line is O(n), which makes the algorithm O(n²), but it should be good
+                    // enough for now.
+                    segments.insert(insertion_point, segment);
+                }
+            }
+        }
+
+        Self { segments }.check_invariants()
+    }
+}
+
 // REPORT ######################################################################
 
 impl<V: Display + Eq> Display for Ranges<V> {
@@ -1182,6 +1362,16 @@ pub mod tests {
                 assert_eq!(range.contains(&v), simp.contains(&v));
             }
             assert!(simp.segments.len() <= range.segments.len())
+        }
+
+        #[test]
+        fn from_iter_valid(segments in proptest::collection::vec(any::<(Bound<u32>, Bound<u32>)>(), ..30)) {
+            let mut expected = Ranges::empty();
+            for segment in &segments {
+                expected = expected.union(&Ranges::from_range_bounds(*segment));
+            }
+            let actual =  Ranges::from_iter(segments.clone());
+            assert_eq!(expected, actual, "{segments:?}");
         }
     }
 
