@@ -92,16 +92,19 @@ impl<P: Package, VS: VersionSet> DependencyProvider for OfflineDependencyProvide
             .and_then(|versions| versions.keys().rev().find(|v| range.contains(v)).cloned()))
     }
 
-    type Priority = Reverse<usize>;
+    type Priority = (u32, Reverse<u32>);
 
     #[inline]
-    fn prioritize(&self, package: &P, range: &VS) -> Self::Priority {
-        Reverse(
-            self.dependencies
-                .get(package)
-                .map(|versions| versions.keys().filter(|v| range.contains(v)).count())
-                .unwrap_or(0),
-        )
+    fn prioritize(&self, package: &P, range: &VS, conflict_count: u32) -> Self::Priority {
+        let version_count = self
+            .dependencies
+            .get(package)
+            .map(|versions| versions.keys().filter(|v| range.contains(v)).count())
+            .unwrap_or(0);
+        if version_count == 0 {
+            return (u32::MAX, Reverse(0));
+        }
+        (conflict_count, Reverse(version_count as u32))
     }
 
     #[inline]

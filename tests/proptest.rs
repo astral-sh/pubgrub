@@ -49,8 +49,8 @@ impl<P: Package, VS: VersionSet> DependencyProvider for OldestVersionsDependency
 
     type Priority = <OfflineDependencyProvider<P, VS> as DependencyProvider>::Priority;
 
-    fn prioritize(&self, package: &P, range: &VS) -> Self::Priority {
-        self.0.prioritize(package, range)
+    fn prioritize(&self, package: &P, range: &VS, conflict_count: u32) -> Self::Priority {
+        self.0.prioritize(package, range, conflict_count)
     }
 
     type Err = Infallible;
@@ -104,8 +104,8 @@ impl<DP: DependencyProvider> DependencyProvider for TimeoutDependencyProvider<DP
 
     type Priority = DP::Priority;
 
-    fn prioritize(&self, package: &DP::P, range: &DP::VS) -> Self::Priority {
-        self.dp.prioritize(package, range)
+    fn prioritize(&self, package: &DP::P, range: &DP::VS, conflict_count: u32) -> Self::Priority {
+        self.dp.prioritize(package, range, conflict_count)
     }
 
     type Err = DP::Err;

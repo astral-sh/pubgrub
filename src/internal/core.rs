@@ -31,6 +31,8 @@ pub(crate) struct State<DP: DependencyProvider> {
     #[allow(clippy::type_complexity)]
     merged_dependencies: Map<(Id<DP::P>, Id<DP::P>), SmallVec<IncompDpId<DP>>>,
 
+    pub(crate) conflict_count: Map<Id<DP::P>, u32>,
+
     /// Partial solution.
     /// TODO: remove pub.
     pub(crate) partial_solution: PartialSolution<DP>,
@@ -69,6 +71,7 @@ impl<DP: DependencyProvider> State<DP> {
             package_store,
             unit_propagation_buffer: SmallVec::Empty,
             merged_dependencies: Map::default(),
+            conflict_count: Map::default(),
         }
     }
 
@@ -163,6 +166,9 @@ impl<DP: DependencyProvider> State<DP> {
                 }
             }
             if let Some(incompat_id) = conflict_id {
+                for (p, _) in self.incompatibility_store[incompat_id].iter() {
+                    *self.conflict_count.entry(*p).or_default() += 1;
+                }
                 let (package_almost, root_cause) =
                     self.conflict_resolution(incompat_id)
                         .map_err(|terminal_incompat_id| {

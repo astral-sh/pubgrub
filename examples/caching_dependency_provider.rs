@@ -57,8 +57,8 @@ impl<DP: DependencyProvider<M = String>> DependencyProvider for CachingDependenc
 
     type Priority = DP::Priority;
 
-    fn prioritize(&self, package: &DP::P, ranges: &DP::VS) -> Self::Priority {
-        self.remote_dependencies.prioritize(package, ranges)
+    fn prioritize(&self, package: &DP::P, ranges: &DP::VS, conflict_count: u32) -> Self::Priority {
+        self.remote_dependencies.prioritize(package, ranges, conflict_count)
     }
 
     type Err = DP::Err;

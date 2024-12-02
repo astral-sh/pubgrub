@@ -97,7 +97,11 @@ pub fn resolve<DP: DependencyProvider>(
 
         let Some(highest_priority_pkg) =
             state.partial_solution.pick_highest_priority_pkg(|p, r| {
-                dependency_provider.prioritize(&state.package_store[p], r)
+                dependency_provider.prioritize(
+                    &state.package_store[p],
+                    r,
+                    state.conflict_count.get(&p).cloned().unwrap_or_default(),
+                )
             })
         else {
             return Ok(state
@@ -254,7 +258,12 @@ pub trait DependencyProvider {
     ///
     /// Note: the resolver may call this even when the range has not changed,
     /// if it is more efficient for the resolvers internal data structures.
-    fn prioritize(&self, package: &Self::P, range: &Self::VS) -> Self::Priority;
+    fn prioritize(
+        &self,
+        package: &Self::P,
+        range: &Self::VS,
+        conflict_count: u32,
+    ) -> Self::Priority;
     /// The type returned from `prioritize`. The resolver does not care what type this is
     /// as long as it can pick a largest one and clone it.
     ///
