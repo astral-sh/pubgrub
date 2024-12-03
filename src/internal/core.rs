@@ -83,7 +83,7 @@ impl<DP: DependencyProvider> State<DP> {
         let dep_incompats =
             self.add_incompatibility_from_dependencies(package, version.clone(), dependencies);
         self.partial_solution.add_package_version_incompatibilities(
-            package.clone(),
+            package,
             version.clone(),
             dep_incompats,
             &self.incompatibility_store,
