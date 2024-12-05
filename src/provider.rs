@@ -2,7 +2,10 @@ use std::cmp::Reverse;
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 
-use crate::{Dependencies, DependencyConstraints, DependencyProvider, Map, Package, VersionSet};
+use crate::{
+    Dependencies, DependencyConstraints, DependencyProvider, Map, Package,
+    PackageResolutionStatistics, VersionSet,
+};
 
 /// A basic implementation of [DependencyProvider].
 #[derive(Debug, Clone, Default)]
@@ -95,7 +98,12 @@ impl<P: Package, VS: VersionSet> DependencyProvider for OfflineDependencyProvide
     type Priority = (u32, Reverse<u32>);
 
     #[inline]
-    fn prioritize(&self, package: &P, range: &VS, conflict_count: u32) -> Self::Priority {
+    fn prioritize(
+        &self,
+        package: &P,
+        range: &VS,
+        statis: &PackageResolutionStatistics,
+    ) -> Self::Priority {
         let version_count = self
             .dependencies
             .get(package)
@@ -104,7 +112,7 @@ impl<P: Package, VS: VersionSet> DependencyProvider for OfflineDependencyProvide
         if version_count == 0 {
             return (u32::MAX, Reverse(0));
         }
-        (conflict_count, Reverse(version_count as u32))
+        (statis.conflict_count(), Reverse(version_count as u32))
     }
 
     #[inline]

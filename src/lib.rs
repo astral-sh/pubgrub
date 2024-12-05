@@ -86,7 +86,7 @@
 //!     }
 //!
 //!     type Priority = usize;
-//!     fn prioritize(&self, package: &String, range: &SemVS) -> Self::Priority {
+//!     fn prioritize(&self, package: &String, range: &SemVS, statis: &PackageResolutionStatistics) -> Self::Priority {
 //!         unimplemented!()
 //!     }
 //!
@@ -227,7 +227,7 @@ pub use report::{
     DefaultStringReportFormatter, DefaultStringReporter, DerivationTree, Derived, External,
     ReportFormatter, Reporter,
 };
-pub use solver::{resolve, Dependencies, DependencyProvider};
+pub use solver::{resolve, Dependencies, DependencyProvider, PackageResolutionStatistics};
 pub use term::Term;
 pub use type_aliases::{DependencyConstraints, Map, SelectedDependencies, Set};
 pub use version::{SemanticVersion, VersionParseError};

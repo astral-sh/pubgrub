@@ -97,11 +97,8 @@ pub fn resolve<DP: DependencyProvider>(
 
         let Some(highest_priority_pkg) =
             state.partial_solution.pick_highest_priority_pkg(|p, r| {
-                dependency_provider.prioritize(
-                    &state.package_store[p],
-                    r,
-                    state.conflict_count.get(&p).cloned().unwrap_or_default(),
-                )
+                let statis = PackageResolutionStatistics::new(p, &state.conflict_count);
+                dependency_provider.prioritize(&state.package_store[p], r, &statis)
             })
         else {
             return Ok(state
@@ -203,6 +200,46 @@ pub enum Dependencies<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Displa
     Available(DependencyConstraints<P, VS>),
 }
 
+/// Some statistics about how much trouble the resolver has had with a package.
+pub struct PackageResolutionStatistics {
+    discovery_order: u32,
+    conflict_count: u32,
+}
+
+impl PackageResolutionStatistics {
+    fn new<P: Package>(pid: Id<P>, conflict_count: &Map<Id<P>, u32>) -> Self {
+        Self {
+            discovery_order: pid.into_raw() as u32,
+            conflict_count: conflict_count.get(&pid).cloned().unwrap_or_default(),
+        }
+    }
+
+    /// The number of packages resolution new about the first time this package was mentioned.
+    ///
+    /// The root package will return `0`. It's direct dependencies will start at `1` and go up from there.
+    /// Prioritizing based on this value directly will lead to a depth first search of the resolution graph.
+    /// Prioritizing based on the reverse of this value will lead to a breadth first search of the resolution graph.
+    ///
+    /// Note: The exact values depend on implementation details of PubGrub and its dependencies.
+    /// So should not be relied on and may change between any lock file update.
+    pub fn discovery_order(&self) -> u32 {
+        self.discovery_order
+    }
+
+    /// The number of times this package was involved in a conflict that caused a back jump.
+    ///
+    /// When resolution is proceeding normally, this value will stay at `0` for all packages.
+    /// Therefore, using this for prioritization will not affect the properties of simple cases
+    /// like checking a lock file.
+    /// Prioritizing based on this value directly allows the resolver to focus on the packages
+    /// it is having the most problems with.
+    ///
+    /// Note: The exact values depend on implementation details of PubGrub. So should not be relied on and may change.
+    pub fn conflict_count(&self) -> u32 {
+        self.conflict_count
+    }
+}
+
 /// Trait that allows the algorithm to retrieve available packages and their dependencies.
 /// An implementor needs to be supplied to the [resolve] function.
 pub trait DependencyProvider {
@@ -238,8 +275,8 @@ pub trait DependencyProvider {
     ///
     /// Every time such a decision must be made, the resolver looks at all the potential valid
     /// packages that have changed, and a asks the dependency provider how important each one is.
-    /// For each one it calls `prioritize` with the name of the package and the current set of
-    /// acceptable versions.
+    /// For each one it calls `prioritize` with the name of the package, the current set of
+    /// acceptable versions, and some statistics about how much trouble the resolver has had with that package.
     /// The resolver will then pick the package with the highes priority from all the potential valid
     /// packages.
     ///
@@ -262,7 +299,7 @@ pub trait DependencyProvider {
         &self,
         package: &Self::P,
         range: &Self::VS,
-        conflict_count: u32,
+        statis: &PackageResolutionStatistics,
     ) -> Self::Priority;
     /// The type returned from `prioritize`. The resolver does not care what type this is
     /// as long as it can pick a largest one and clone it.
