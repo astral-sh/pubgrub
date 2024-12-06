@@ -214,7 +214,7 @@ impl PackageResolutionStatistics {
         }
     }
 
-    /// The number of packages resolution new about the first time this package was mentioned.
+    /// The number of packages known by Pubgrub when this package was mentioned for the first time.
     ///
     /// The root package will return `0`. It's direct dependencies will start at `1` and go up from there.
     /// Prioritizing based on this value directly will lead to a depth first search of the resolution graph.
