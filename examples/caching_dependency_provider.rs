@@ -66,7 +66,7 @@ impl<DP: DependencyProvider<M = String>> DependencyProvider for CachingDependenc
         ranges: &DP::VS,
         stats: &PackageResolutionStatistics,
     ) -> Self::Priority {
-        self.remote_dependencies.prioritize(package, ranges, statis)
+        self.remote_dependencies.prioritize(package, ranges, stats)
     }
 
     type Err = DP::Err;

@@ -97,8 +97,8 @@ pub fn resolve<DP: DependencyProvider>(
 
         let Some(highest_priority_pkg) =
             state.partial_solution.pick_highest_priority_pkg(|p, r| {
-                let statis = PackageResolutionStatistics::new(p, &state.conflict_count);
-                dependency_provider.prioritize(&state.package_store[p], r, &statis)
+                let stats = PackageResolutionStatistics::new(p, &state.conflict_count);
+                dependency_provider.prioritize(&state.package_store[p], r, &stats)
             })
         else {
             return Ok(state
@@ -299,7 +299,7 @@ pub trait DependencyProvider {
         &self,
         package: &Self::P,
         range: &Self::VS,
-        statis: &PackageResolutionStatistics,
+        stats: &PackageResolutionStatistics,
     ) -> Self::Priority;
     /// The type returned from `prioritize`. The resolver does not care what type this is
     /// as long as it can pick a largest one and clone it.

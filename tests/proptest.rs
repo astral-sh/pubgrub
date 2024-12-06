@@ -53,9 +53,9 @@ impl<P: Package, VS: VersionSet> DependencyProvider for OldestVersionsDependency
         &self,
         package: &P,
         range: &VS,
-        statis: &PackageResolutionStatistics,
+        stats: &PackageResolutionStatistics,
     ) -> Self::Priority {
-        self.0.prioritize(package, range, statis)
+        self.0.prioritize(package, range, stats)
     }
 
     type Err = Infallible;
@@ -113,9 +113,9 @@ impl<DP: DependencyProvider> DependencyProvider for TimeoutDependencyProvider<DP
         &self,
         package: &DP::P,
         range: &DP::VS,
-        statis: &PackageResolutionStatistics,
+        stats: &PackageResolutionStatistics,
     ) -> Self::Priority {
-        self.dp.prioritize(package, range, statis)
+        self.dp.prioritize(package, range, stats)
     }
 
     type Err = DP::Err;

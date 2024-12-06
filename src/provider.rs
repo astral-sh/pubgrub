@@ -102,7 +102,7 @@ impl<P: Package, VS: VersionSet> DependencyProvider for OfflineDependencyProvide
         &self,
         package: &P,
         range: &VS,
-        statis: &PackageResolutionStatistics,
+        stats: &PackageResolutionStatistics,
     ) -> Self::Priority {
         let version_count = self
             .dependencies
@@ -112,7 +112,7 @@ impl<P: Package, VS: VersionSet> DependencyProvider for OfflineDependencyProvide
         if version_count == 0 {
             return (u32::MAX, Reverse(0));
         }
-        (statis.conflict_count(), Reverse(version_count as u32))
+        (stats.conflict_count(), Reverse(version_count as u32))
     }
 
     #[inline]

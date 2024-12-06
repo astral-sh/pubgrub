@@ -87,7 +87,7 @@
 //!     }
 //!
 //!     type Priority = usize;
-//!     fn prioritize(&self, package: &String, range: &SemVS, statis: &PackageResolutionStatistics) -> Self::Priority {
+//!     fn prioritize(&self, package: &String, range: &SemVS, stats: &PackageResolutionStatistics) -> Self::Priority {
 //!         unimplemented!()
 //!     }
 //!
