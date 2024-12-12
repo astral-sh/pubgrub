@@ -6,6 +6,7 @@
 use std::fmt::{Debug, Display};
 use std::hash::BuildHasherDefault;
 
+use log::debug;
 use priority_queue::PriorityQueue;
 use rustc_hash::FxHasher;
 
@@ -377,12 +378,37 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         self.has_ever_backtracked = true;
     }
 
-    /// We can add the version to the partial solution as a decision
-    /// if it doesn't produce any conflict with the new incompatibilities.
-    /// In practice I think it can only produce a conflict if one of the dependencies
-    /// (which are used to make the new incompatibilities)
-    /// is already in the partial solution with an incompatible version.
-    pub(crate) fn add_package_version_incompatibilities(
+    /// Backtrack the partial solution before a particular package was selected.
+    ///
+    /// This can be used to switch the order of packages if the previous prioritization was bad.
+    ///
+    /// Returns the new decision level on success and an error if the package was not decided on
+    /// yet.
+    pub(crate) fn backtrack_package(&mut self, package: Id<DP::P>) -> Result<DecisionLevel, ()> {
+        let Some(decision_level) = self.package_assignments.get_index_of(&package) else {
+            return Err(());
+        };
+        let decision_level = DecisionLevel(decision_level as u32);
+        if decision_level > self.current_decision_level {
+            return Err(());
+        }
+        debug!(
+            "Package backtracking ot decision level {}",
+            decision_level.0
+        );
+        self.backtrack(decision_level);
+        Ok(decision_level)
+    }
+
+    /// Add a package version as decision if none of its dependencies conflicts with the partial
+    /// solution.
+    ///
+    /// If the resolution never backtracked before, a fast path adds the package version directly
+    /// without checking dependencies.
+    ///
+    /// Returns the incompatibility that caused the current version to be rejected, if a conflict
+    /// in the dependencies was found.
+    pub(crate) fn add_package_version_dependencies(
         &mut self,
         package: Id<DP::P>,
         version: DP::V,
