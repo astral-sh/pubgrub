@@ -10,7 +10,8 @@ use priority_queue::PriorityQueue;
 use rustc_hash::FxHasher;
 
 use crate::internal::{
-    Arena, HashArena, Id, IncompDpId, IncompId, Incompatibility, Relation, SmallMap, SmallVec,
+    Arena, HashArena, Id, IncompDpId, IncompId, IncompatIterItem, Incompatibility, Relation,
+    SmallMap, SmallVec,
 };
 use crate::{DependencyProvider, Package, Term, VersionSet};
 
@@ -323,7 +324,21 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             .map(|(&p, pa)| match &pa.assignments_intersection {
                 AssignmentsIntersection::Decision((_, v, _)) => (p, v.clone()),
                 AssignmentsIntersection::Derivations(_) => {
-                    panic!("Derivations in the Decision part")
+                    let mut context = String::new();
+                    for (id, assignment) in self
+                        .package_assignments
+                        .iter()
+                        .take(self.current_decision_level.0 as usize)
+                    {
+                        context.push_str(&format!(
+                            " * {:?} {:?}\n",
+                            id, assignment.assignments_intersection
+                        ));
+                    }
+                    panic!(
+                        "Derivations in the Decision part. Decision level {}\n{}",
+                        self.current_decision_level.0, context
+                    )
                 }
             })
     }
@@ -370,45 +385,52 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         self.has_ever_backtracked = true;
     }
 
-    /// We can add the version to the partial solution as a decision
-    /// if it doesn't produce any conflict with the new incompatibilities.
-    /// In practice I think it can only produce a conflict if one of the dependencies
-    /// (which are used to make the new incompatibilities)
-    /// is already in the partial solution with an incompatible version.
-    pub(crate) fn add_package_version_incompatibilities(
-        &mut self,
+    /// Add a package version as decision if none of its dependencies conflicts with the partial
+    /// solution.
+    ///
+    /// If the resolution never backtracked before, a fast path adds the package version directly
+    /// without checking dependencies.
+    ///
+    /// Returns the incompatibility that caused the current version to be rejected, if a conflict
+    /// in the dependencies was found.
+    pub(crate) fn check_package_version_incompatibilities<'a>(
+        &'a mut self,
         package: Id<DP::P>,
         version: DP::V,
         new_incompatibilities: std::ops::Range<IncompId<DP::P, DP::VS, DP::M>>,
-        store: &Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
-    ) {
+        store: &'a Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
+    ) -> Option<impl Iterator<Item = IncompatIterItem<'a, DP::P, DP::VS>> + 'a> {
         if !self.has_ever_backtracked {
-            // Nothing has yet gone wrong during this resolution. This call is unlikely to be the first problem.
+            // Fast path: Nothing has yet gone wrong during this resolution. This call is unlikely to be the first problem.
             // So let's live with a little bit of risk and add the decision without checking the dependencies.
             // The worst that can happen is we will have to do a full backtrack which only removes this one decision.
             log::info!("add_decision: {package:?} @ {version} without checking dependencies");
             self.add_decision(package, version);
-        } else {
-            // Check if any of the new dependencies preclude deciding on this crate version.
-            let exact = Term::exact(version.clone());
-            let not_satisfied = |incompat: &Incompatibility<DP::P, DP::VS, DP::M>| {
-                incompat.relation(|p| {
-                    if p == package {
-                        Some(&exact)
-                    } else {
-                        self.term_intersection_for_package(p)
-                    }
-                }) != Relation::Satisfied
-            };
+            return None;
+        }
 
-            // Check none of the dependencies (new_incompatibilities)
-            // would create a conflict (be satisfied).
-            if store[new_incompatibilities].iter().all(not_satisfied) {
-                log::info!("add_decision: {package:?} @ {version}");
-                self.add_decision(package, version);
-            } else {
-                log::info!("not adding {package:?} @ {version} because of its dependencies",);
-            }
+        // Check if any of the dependencies preclude deciding on this crate version.
+        let package_term = Term::exact(version.clone());
+        let relation = |incompat: &Incompatibility<DP::P, DP::VS, DP::M>| {
+            incompat.relation(|p| {
+                // The current package isn't part of the package assignments yet.
+                if p == package {
+                    Some(&package_term)
+                } else {
+                    self.term_intersection_for_package(p)
+                }
+            })
+        };
+        if let Some(satisfied) = store[new_incompatibilities]
+            .iter()
+            .find(|incompat| relation(incompat) == Relation::Satisfied)
+        {
+            log::info!("not adding {package:?} @ {version} because its dependencies conflict");
+            Some(satisfied.iter())
+        } else {
+            log::info!("add_decision: {package:?} @ {version}");
+            self.add_decision(package, version);
+            None
         }
     }
 

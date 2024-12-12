@@ -7,8 +7,8 @@ use std::collections::HashSet as Set;
 use std::sync::Arc;
 
 use crate::internal::{
-    Arena, DecisionLevel, HashArena, Id, IncompDpId, Incompatibility, PartialSolution, Relation,
-    SatisfierSearch, SmallVec,
+    Arena, DecisionLevel, HashArena, Id, IncompDpId, IncompatIterItem, Incompatibility,
+    PartialSolution, Relation, SatisfierSearch, SmallVec,
 };
 use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, VersionSet};
 
@@ -74,20 +74,24 @@ impl<DP: DependencyProvider> State<DP> {
     }
 
     /// Add the dependencies for the current version of the current package as incompatibilities.
+    ///
+    /// Returns the incompatibility that caused the current version to be rejected, if it was
+    /// rejected due to its dependencies.
     pub fn add_package_version_dependencies(
         &mut self,
         package: Id<DP::P>,
         version: DP::V,
         dependencies: impl IntoIterator<Item = (DP::P, DP::VS)>,
-    ) {
+    ) -> Option<impl Iterator<Item = IncompatIterItem<'_, DP::P, DP::VS>>> {
         let dep_incompats =
             self.add_incompatibility_from_dependencies(package, version.clone(), dependencies);
-        self.partial_solution.add_package_version_incompatibilities(
-            package,
-            version.clone(),
-            dep_incompats,
-            &self.incompatibility_store,
-        )
+        self.partial_solution
+            .check_package_version_incompatibilities(
+                package,
+                version.clone(),
+                dep_incompats,
+                &self.incompatibility_store,
+            )
     }
 
     /// Add an incompatibility to the state.
@@ -124,8 +128,18 @@ impl<DP: DependencyProvider> State<DP> {
 
     /// Unit propagation is the core mechanism of the solving algorithm.
     /// CF <https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation>
+    ///
+    /// Returns the last incompatibility, if there was a conflict.
     #[cold]
-    pub fn unit_propagation(&mut self, package: Id<DP::P>) -> Result<(), NoSolutionError<DP>> {
+    #[allow(clippy::type_complexity)] // Type definitions don't support impl trait.
+    pub fn unit_propagation(
+        &mut self,
+        package: Id<DP::P>,
+    ) -> Result<
+        Option<impl Iterator<Item = IncompatIterItem<'_, DP::P, DP::VS>>>,
+        NoSolutionError<DP>,
+    > {
+        let mut last_incompat = None;
         self.unit_propagation_buffer.clear();
         self.unit_propagation_buffer.push(package);
         while let Some(current_package) = self.unit_propagation_buffer.pop() {
@@ -183,6 +197,7 @@ impl<DP: DependencyProvider> State<DP> {
                         .map_err(|terminal_incompat_id| {
                             self.build_derivation_tree(terminal_incompat_id)
                         })?;
+                last_incompat = Some(root_cause);
                 self.unit_propagation_buffer.clear();
                 self.unit_propagation_buffer.push(package_almost);
                 // Add to the partial solution with incompat as cause.
@@ -198,7 +213,7 @@ impl<DP: DependencyProvider> State<DP> {
             }
         }
         // If there are no more changed packages, unit propagation is done.
-        Ok(())
+        Ok(last_incompat.map(|incompat| self.incompatibility_store[incompat].iter()))
     }
 
     /// Return the root cause or the terminal incompatibility.

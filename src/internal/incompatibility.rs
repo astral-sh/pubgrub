@@ -12,6 +12,9 @@ use crate::{
     VersionSet,
 };
 
+// An entry in an incompatibility when iterating over one.
+pub(crate) type IncompatIterItem<'term, P, VS> = (Id<P>, &'term Term<VS>);
+
 /// An incompatibility is a set of terms for different packages
 /// that should never be satisfied all together.
 /// An incompatibility usually originates from a package dependency.
@@ -248,7 +251,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     }
 
     /// Iterate over packages.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (Id<P>, &Term<VS>)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = IncompatIterItem<'_, P, VS>> {
         self.package_terms
             .iter()
             .map(|(package, term)| (*package, term))
