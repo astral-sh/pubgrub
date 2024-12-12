@@ -51,33 +51,6 @@ pub(crate) struct PartialSolution<DP: DependencyProvider> {
     has_ever_backtracked: bool,
 }
 
-impl<DP: DependencyProvider> PartialSolution<DP> {
-    pub fn display<'a>(&'a self, package_store: &'a HashArena<DP::P>) -> impl Display + 'a {
-        struct PSDisplay<'a, DP: DependencyProvider>(&'a PartialSolution<DP>, &'a HashArena<DP::P>);
-
-        impl<DP: DependencyProvider> Display for PSDisplay<'_, DP> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let mut assignments: Vec<_> = self
-                    .0
-                    .package_assignments
-                    .iter()
-                    .map(|(p, pa)| format!("{:?} = '{}': {}", p, self.1[*p], pa))
-                    .collect();
-                assignments.sort();
-                write!(
-                    f,
-                    "next_global_index: {}\ncurrent_decision_level: {:?}\npackage_assignments:\n{}",
-                    self.0.next_global_index,
-                    self.0.current_decision_level,
-                    assignments.join("\t\n")
-                )
-            }
-        }
-
-        PSDisplay(self, package_store)
-    }
-}
-
 /// Package assignments contain the potential decision and derivations
 /// that have already been made for a given package,
 /// as well as the intersection of terms by all of these.
@@ -165,6 +138,31 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             changed_this_decision_level: 0,
             has_ever_backtracked: false,
         }
+    }
+
+    pub(crate) fn display<'a>(&'a self, package_store: &'a HashArena<DP::P>) -> impl Display + 'a {
+        struct PSDisplay<'a, DP: DependencyProvider>(&'a PartialSolution<DP>, &'a HashArena<DP::P>);
+
+        impl<DP: DependencyProvider> Display for PSDisplay<'_, DP> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                let mut assignments: Vec<_> = self
+                    .0
+                    .package_assignments
+                    .iter()
+                    .map(|(p, pa)| format!("{:?} = '{}': {}", p, self.1[*p], pa))
+                    .collect();
+                assignments.sort();
+                write!(
+                    f,
+                    "next_global_index: {}\ncurrent_decision_level: {:?}\npackage_assignments:\n{}",
+                    self.0.next_global_index,
+                    self.0.current_decision_level,
+                    assignments.join("\t\n")
+                )
+            }
+        }
+
+        PSDisplay(self, package_store)
     }
 
     /// Add a decision.
