@@ -66,7 +66,7 @@ pub(crate) struct PartialSolution<DP: DependencyProvider> {
     /// The max heap allows quickly `pop`ing the highest priority package.
     prioritized_potential_packages:
         PriorityQueue<Id<DP::P>, DP::Priority, BuildHasherDefault<FxHasher>>,
-    /// Track whether we have never backtracked to enable fast path optimizations.
+    /// Whether we have never backtracked, to enable fast path optimizations.
     has_ever_backtracked: bool,
 }
 
