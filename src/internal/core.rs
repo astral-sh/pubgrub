@@ -106,11 +106,16 @@ impl<DP: DependencyProvider> State<DP> {
 
     /// Unit propagation is the core mechanism of the solving algorithm.
     /// CF <https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation>
+    ///
+    /// For each package with a satisfied incompatibility, returns the package and the root cause
+    /// incompatibility.
     #[cold]
+    #[allow(clippy::type_complexity)] // Type definitions don't support impl trait.
     pub(crate) fn unit_propagation(
         &mut self,
         package: Id<DP::P>,
-    ) -> Result<(), NoSolutionError<DP>> {
+    ) -> Result<Vec<(Id<DP::P>, IncompDpId<DP>)>, NoSolutionError<DP>> {
+        let mut root_causes = Vec::new();
         self.unit_propagation_buffer.clear();
         self.unit_propagation_buffer.push(package);
         while let Some(current_package) = self.unit_propagation_buffer.pop() {
@@ -168,6 +173,7 @@ impl<DP: DependencyProvider> State<DP> {
                         .map_err(|terminal_incompat_id| {
                             self.build_derivation_tree(terminal_incompat_id)
                         })?;
+                root_causes.push((package, root_cause));
                 self.unit_propagation_buffer.clear();
                 self.unit_propagation_buffer.push(package_almost);
                 // Add to the partial solution with incompat as cause.
@@ -183,7 +189,7 @@ impl<DP: DependencyProvider> State<DP> {
             }
         }
         // If there are no more changed packages, unit propagation is done.
-        Ok(())
+        Ok(root_causes)
     }
 
     /// Return the root cause or the terminal incompatibility.
