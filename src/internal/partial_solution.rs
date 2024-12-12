@@ -210,6 +210,13 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         self.next_global_index += 1;
     }
 
+    /// The list of package that have not been selected after the last prioritization.
+    ///
+    /// This list gets updated by [`Self::pick_highest_priority_pkg`] and cleared by backtracking.
+    pub fn undecided_packages(&self) -> impl Iterator<Item = (&Id<DP::P>, &DP::Priority)> {
+        self.prioritized_potential_packages.iter()
+    }
+
     /// Add a derivation.
     pub(crate) fn add_derivation(
         &mut self,
