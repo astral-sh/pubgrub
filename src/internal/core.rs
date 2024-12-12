@@ -264,7 +264,8 @@ impl<DP: DependencyProvider> State<DP> {
         }
     }
 
-    /// Backtracking.
+    /// After a conflict occurred, backtrack the partial solution to a given decision level, and add
+    /// the incompatibility if it was new.
     fn backtrack(
         &mut self,
         incompat: IncompDpId<DP>,
@@ -278,6 +279,21 @@ impl<DP: DependencyProvider> State<DP> {
         if incompat_changed {
             self.merge_incompatibility(incompat);
         }
+    }
+
+    /// Manually backtrack before the given package was selected.
+    ///
+    /// This can be used to switch the order of packages if the previous prioritization was bad.
+    ///
+    /// Returns the number of the decisions that were backtracked, or `None` if the package was not
+    /// decided on yet.
+    pub fn backtrack_package(&mut self, package: Id<DP::P>) -> Option<u32> {
+        let base_decision_level = self.partial_solution.current_decision_level();
+        let new_decision_level = self.partial_solution.backtrack_package(package).ok()?;
+        // Remove contradicted incompatibilities that depend on decisions we just backtracked away.
+        self.contradicted_incompatibilities
+            .retain(|_, dl| *dl <= new_decision_level);
+        Some(base_decision_level.0 - new_decision_level.0)
     }
 
     /// Add this incompatibility into the set of all incompatibilities.
