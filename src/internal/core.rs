@@ -166,14 +166,14 @@ impl<DP: DependencyProvider> State<DP> {
                 }
             }
             if let Some(incompat_id) = conflict_id {
-                for (p, _) in self.incompatibility_store[incompat_id].iter() {
-                    *self.conflict_count.entry(*p).or_default() += 1;
-                }
                 let (package_almost, root_cause) =
                     self.conflict_resolution(incompat_id)
                         .map_err(|terminal_incompat_id| {
                             self.build_derivation_tree(terminal_incompat_id)
                         })?;
+                for (p, _) in self.incompatibility_store[root_cause].iter() {
+                    *self.conflict_count.entry(*p).or_default() += 1;
+                }
                 self.unit_propagation_buffer.clear();
                 self.unit_propagation_buffer.push(package_almost);
                 // Add to the partial solution with incompat as cause.
