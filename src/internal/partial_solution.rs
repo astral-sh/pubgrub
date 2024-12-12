@@ -35,7 +35,9 @@ pub(crate) struct PartialSolution<DP: DependencyProvider> {
     /// Store for all known package decisions and package derivations.
     ///
     /// "assignment" refers to both packages with decisions and package with only derivations and
-    /// no decision yet.
+    /// no decision yet. We combine this in a single index map, where different sections (of
+    /// indexes) contain package with different level of information, and make a decision moves a
+    /// package from the derivations sections to the decisions section.
     ///
     /// `[..current_decision_level]`: Packages that have had a decision made, sorted by the
     /// `decision_level`. The section is can be seen as the partial solution, it contains a
@@ -43,7 +45,7 @@ pub(crate) struct PartialSolution<DP: DependencyProvider> {
     /// extract the solution, and to backtrack to a particular decision level. The
     /// `AssignmentsIntersection` is always a `Decision`.
     ///
-    /// `[changed_this_decision_level..]`: Packages that are dependencies of some other package,
+    /// `[prioritize_decision_level..]`: Packages that are dependencies of some other package,
     /// but have not yet been decided. The `AssignmentsIntersection` is always a `Derivations`, the
     /// derivations store the obligations from the decided packages. This section has two
     /// subsections to optimize the number of `prioritize` calls:
@@ -280,7 +282,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                         *t = t.intersection(&dated_derivation.accumulated_intersection);
                         dated_derivation.accumulated_intersection = t.clone();
                         if t.is_positive() {
-                            // we can use `swap_indices` to make `changed_this_decision_level` only go down by 1
+                            // we can use `swap_indices` to make `prioritize_decision_level` only go down by 1
                             // but the copying is slower then the larger search
                             self.prioritize_decision_level =
                                 std::cmp::min(self.prioritize_decision_level, idx);
