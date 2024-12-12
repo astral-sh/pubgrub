@@ -7,8 +7,8 @@ use std::collections::HashSet as Set;
 use std::sync::Arc;
 
 use crate::internal::{
-    Arena, DecisionLevel, HashArena, Id, IncompDpId, Incompatibility, PartialSolution, Relation,
-    SatisfierSearch, SmallVec,
+    Arena, DecisionLevel, HashArena, Id, IncompDpId, IncompId, Incompatibility, PartialSolution,
+    Relation, SatisfierSearch, SmallVec,
 };
 use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, VersionSet};
 
@@ -79,7 +79,7 @@ impl<DP: DependencyProvider> State<DP> {
         package: Id<DP::P>,
         version: DP::V,
         dependencies: impl IntoIterator<Item = (DP::P, DP::VS)>,
-    ) {
+    ) -> Option<IncompId<DP::P, DP::VS, DP::M>> {
         let dep_incompats =
             self.add_incompatibility_from_dependencies(package, version.clone(), dependencies);
         self.partial_solution.add_package_version_dependencies(
@@ -124,8 +124,16 @@ impl<DP: DependencyProvider> State<DP> {
 
     /// Unit propagation is the core mechanism of the solving algorithm.
     /// CF <https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation>
+    ///
+    /// For each package with a satisfied incompatibility, returns the package and the root cause
+    /// incompatibility.
     #[cold]
-    pub fn unit_propagation(&mut self, package: Id<DP::P>) -> Result<(), NoSolutionError<DP>> {
+    #[allow(clippy::type_complexity)] // Type definitions don't support impl trait.
+    pub fn unit_propagation(
+        &mut self,
+        package: Id<DP::P>,
+    ) -> Result<Vec<(Id<DP::P>, IncompDpId<DP>)>, NoSolutionError<DP>> {
+        let mut root_causes = Vec::new();
         self.unit_propagation_buffer.clear();
         self.unit_propagation_buffer.push(package);
         while let Some(current_package) = self.unit_propagation_buffer.pop() {
@@ -183,6 +191,7 @@ impl<DP: DependencyProvider> State<DP> {
                         .map_err(|terminal_incompat_id| {
                             self.build_derivation_tree(terminal_incompat_id)
                         })?;
+                root_causes.push((package, root_cause));
                 self.unit_propagation_buffer.clear();
                 self.unit_propagation_buffer.push(package_almost);
                 // Add to the partial solution with incompat as cause.
@@ -198,7 +207,7 @@ impl<DP: DependencyProvider> State<DP> {
             }
         }
         // If there are no more changed packages, unit propagation is done.
-        Ok(())
+        Ok(root_causes)
     }
 
     /// Return the root cause or the terminal incompatibility.
