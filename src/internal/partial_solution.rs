@@ -12,7 +12,7 @@ use rustc_hash::FxHasher;
 use crate::internal::{
     Arena, HashArena, Id, IncompDpId, IncompId, Incompatibility, Relation, SmallMap, SmallVec,
 };
-use crate::{DependencyProvider, Package, Term, VersionSet};
+use crate::{DependencyProvider, Map, Package, Term, VersionSet};
 
 type FnvIndexMap<K, V> = indexmap::IndexMap<K, V, BuildHasherDefault<FxHasher>>;
 
@@ -364,6 +364,8 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         version: DP::V,
         new_incompatibilities: std::ops::Range<IncompId<DP::P, DP::VS, DP::M>>,
         store: &Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
+        affected_count: &mut Map<Id<<DP as DependencyProvider>::P>, u32>,
+        culprit_count: &mut Map<Id<<DP as DependencyProvider>::P>, u32>,
     ) {
         if !self.has_ever_backtracked {
             // Nothing has yet gone wrong during this resolution. This call is unlikely to be the first problem.
@@ -372,25 +374,33 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             log::info!("add_decision: {package:?} @ {version} without checking dependencies");
             self.add_decision(package, version);
         } else {
-            // Check if any of the new dependencies preclude deciding on this crate version.
-            let exact = Term::exact(version.clone());
-            let not_satisfied = |incompat: &Incompatibility<DP::P, DP::VS, DP::M>| {
+            // Check if any of the dependencies preclude deciding on this crate version.
+            let package_term = Term::exact(version.clone());
+            let relation = |incompat: &Incompatibility<DP::P, DP::VS, DP::M>| {
                 incompat.relation(|p| {
+                    // The current package isn't part of the package assignments yet.
                     if p == package {
-                        Some(&exact)
+                        Some(&package_term)
                     } else {
                         self.term_intersection_for_package(p)
                     }
-                }) != Relation::Satisfied
+                })
             };
-
-            // Check none of the dependencies (new_incompatibilities)
-            // would create a conflict (be satisfied).
-            if store[new_incompatibilities].iter().all(not_satisfied) {
+            if let Some(satisfied) = store[new_incompatibilities]
+                .iter()
+                .find(|incompat| relation(incompat) == Relation::Satisfied)
+            {
+                log::info!("not adding {package:?} @ {version} because its dependencies conflict");
+                *affected_count.entry(package).or_default() += 1;
+                for (p, _) in satisfied.iter() {
+                    if *p == package {
+                        continue;
+                    }
+                    *culprit_count.entry(*p).or_default() += 1;
+                }
+            } else {
                 log::info!("add_decision: {package:?} @ {version}");
                 self.add_decision(package, version);
-            } else {
-                log::info!("not adding {package:?} @ {version} because of its dependencies",);
             }
         }
     }

@@ -97,7 +97,11 @@ pub fn resolve<DP: DependencyProvider>(
 
         let Some(highest_priority_pkg) =
             state.partial_solution.pick_highest_priority_pkg(|p, r| {
-                let stats = PackageResolutionStatistics::new(p, &state.conflict_count);
+                let stats = PackageResolutionStatistics::new(
+                    p,
+                    &state.culprit_count,
+                    &state.affected_count,
+                );
                 dependency_provider.prioritize(&state.package_store[p], r, &stats)
             })
         else {
@@ -175,9 +179,14 @@ pub fn resolve<DP: DependencyProvider>(
             let dep_incompats =
                 state.add_incompatibility_from_dependencies(p, v.clone(), dependencies);
 
-            state
-                .partial_solution
-                .add_version(p, v, dep_incompats, &state.incompatibility_store);
+            state.partial_solution.add_version(
+                p,
+                v,
+                dep_incompats,
+                &state.incompatibility_store,
+                &mut state.affected_count,
+                &mut state.culprit_count,
+            );
         } else {
             // `dep_incompats` are already in `incompatibilities` so we know there are not satisfied
             // terms and can add the decision directly.
@@ -203,14 +212,20 @@ pub enum Dependencies<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Displa
 /// Some statistics about how much trouble the resolver has had with a package.
 pub struct PackageResolutionStatistics {
     discovery_order: u32,
-    conflict_count: u32,
+    culprit_count: u32,
+    affected_count: u32,
 }
 
 impl PackageResolutionStatistics {
-    fn new<P: Package>(pid: Id<P>, conflict_count: &Map<Id<P>, u32>) -> Self {
+    fn new<P: Package>(
+        pid: Id<P>,
+        culprit_count: &Map<Id<P>, u32>,
+        affected_count: &Map<Id<P>, u32>,
+    ) -> Self {
         Self {
             discovery_order: pid.into_raw() as u32,
-            conflict_count: conflict_count.get(&pid).cloned().unwrap_or_default(),
+            culprit_count: culprit_count.get(&pid).cloned().unwrap_or_default(),
+            affected_count: affected_count.get(&pid).cloned().unwrap_or_default(),
         }
     }
 
@@ -235,8 +250,13 @@ impl PackageResolutionStatistics {
     /// it is having the most problems with.
     ///
     /// Note: The exact values depend on implementation details of PubGrub. So should not be relied on and may change.
-    pub fn conflict_count(&self) -> u32 {
-        self.conflict_count
+    pub fn affected_count(&self) -> u32 {
+        self.affected_count
+    }
+
+    /// TODO(konsti)
+    pub fn culprit_count(&self) -> u32 {
+        self.culprit_count
     }
 }
 
