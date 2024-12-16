@@ -114,8 +114,8 @@ impl<DP: DependencyProvider> State<DP> {
     pub(crate) fn unit_propagation(
         &mut self,
         package: Id<DP::P>,
-    ) -> Result<Vec<(Id<DP::P>, IncompDpId<DP>)>, NoSolutionError<DP>> {
-        let mut root_causes = Vec::new();
+    ) -> Result<SmallVec<(Id<DP::P>, IncompDpId<DP>)>, NoSolutionError<DP>> {
+        let mut root_causes = SmallVec::default();
         self.unit_propagation_buffer.clear();
         self.unit_propagation_buffer.push(package);
         while let Some(current_package) = self.unit_propagation_buffer.pop() {
