@@ -7,6 +7,7 @@ use std::cmp::Reverse;
 use std::fmt::{Debug, Display};
 use std::hash::BuildHasherDefault;
 
+use log::debug;
 use priority_queue::PriorityQueue;
 use rustc_hash::FxHasher;
 
@@ -449,6 +450,28 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         self.prioritized_potential_packages.clear();
         self.prioritize_decision_level = self.current_decision_level.0.saturating_sub(1) as usize;
         self.has_ever_backtracked = true;
+    }
+
+    /// Backtrack the partial solution before a particular package was selected.
+    ///
+    /// This can be used to switch the order of packages if the previous prioritization was bad.
+    ///
+    /// Returns the new decision level on success and an error if the package was not decided on
+    /// yet.
+    pub(crate) fn backtrack_package(&mut self, package: Id<DP::P>) -> Result<DecisionLevel, ()> {
+        let Some(decision_level) = self.package_assignments.get_index_of(&package) else {
+            return Err(());
+        };
+        let decision_level = DecisionLevel(decision_level as u32);
+        if decision_level > self.current_decision_level {
+            return Err(());
+        }
+        debug!(
+            "Package backtracking ot decision level {}",
+            decision_level.0
+        );
+        self.backtrack(decision_level);
+        Ok(decision_level)
     }
 
     /// Add a package version as decision if none of its dependencies conflicts with the partial
