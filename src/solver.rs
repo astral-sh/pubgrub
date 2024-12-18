@@ -71,6 +71,18 @@ use crate::{DependencyConstraints, Map, Package, PubGrubError, SelectedDependenc
 /// Statistics on how often a package conflicted with other packages.
 #[derive(Debug, Default, Clone)]
 pub struct PackageResolutionStatistics {
+    // We track these fields separately but currently don't expose them separately to keep the
+    // stable API slim. Please be encouraged to try different combinations of them and report if
+    // you find better metrics that should be exposed.
+    //
+    // Say we have packages A and B, A having higher priority than B. We first decide A and then B,
+    // and then find B to conflict with A. We call be B "affected" and A "culprit" since the
+    // decisions for B is being rejected due to the decision we made for A earlier.
+    //
+    // If B is rejected due to its dependencies conflicting with A, we increase
+    // `dependencies_affected` for B and for `dependencies_culprit` A. If B is rejected in unit
+    // through an incompatibility with B, we increase `unit_propagation_affected` for B and for
+    // `unit_propagation_culprit` A.
     unit_propagation_affected: u32,
     unit_propagation_culprit: u32,
     dependencies_affected: u32,

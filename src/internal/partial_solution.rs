@@ -304,6 +304,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             .map(|(&p, pa)| match &pa.assignments_intersection {
                 AssignmentsIntersection::Decision((_, v, _)) => (p, v.clone()),
                 AssignmentsIntersection::Derivations(_) => {
+                    // The invariant on the order in `self.package_assignments` was broken.
                     let mut context = String::new();
                     for (id, assignment) in self
                         .package_assignments
