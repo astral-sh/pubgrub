@@ -310,7 +310,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
     #[cold]
     pub(crate) fn pick_highest_priority_pkg(
         &mut self,
-        prioritizer: impl Fn(Id<DP::P>, &DP::VS) -> DP::Priority,
+        mut prioritizer: impl FnMut(Id<DP::P>, &DP::VS) -> DP::Priority,
     ) -> Option<Id<DP::P>> {
         let check_all = self.prioritize_decision_level
             == self.current_decision_level.0.saturating_sub(1) as usize;
@@ -350,7 +350,22 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                     term: _,
                 } => (p, v.clone()),
                 AssignmentsIntersection::Derivations(_) => {
-                    panic!("Derivations in the Decision part")
+                    // The invariant on the order in `self.package_assignments` was broken.
+                    let mut context = String::new();
+                    for (id, assignment) in self
+                        .package_assignments
+                        .iter()
+                        .take(self.current_decision_level.0 as usize)
+                    {
+                        context.push_str(&format!(
+                            " * {:?} {:?}\n",
+                            id, assignment.assignments_intersection
+                        ));
+                    }
+                    panic!(
+                        "Derivations in the Decision part. Decision level {}\n{}",
+                        self.current_decision_level.0, context
+                    )
                 }
             })
     }
@@ -408,34 +423,39 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         version: DP::V,
         new_incompatibilities: std::ops::Range<IncompId<DP::P, DP::VS, DP::M>>,
         store: &Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
-    ) {
+    ) -> Option<IncompId<DP::P, DP::VS, DP::M>> {
         if !self.has_ever_backtracked {
-            // Nothing has yet gone wrong during this resolution. This call is unlikely to be the first problem.
+            // Fast path: Nothing has yet gone wrong during this resolution. This call is unlikely to be the first problem.
             // So let's live with a little bit of risk and add the decision without checking the dependencies.
             // The worst that can happen is we will have to do a full backtrack which only removes this one decision.
             log::info!("add_decision: {package:?} @ {version} without checking dependencies");
             self.add_decision(package, version);
-        } else {
-            // Check if any of the new dependencies preclude deciding on this crate version.
-            let exact = Term::exact(version.clone());
-            let not_satisfied = |incompat: &Incompatibility<DP::P, DP::VS, DP::M>| {
-                incompat.relation(|p| {
-                    if p == package {
-                        Some(&exact)
-                    } else {
-                        self.term_intersection_for_package(p)
-                    }
-                }) != Relation::Satisfied
-            };
+            return None;
+        }
 
-            // Check none of the dependencies (new_incompatibilities)
-            // would create a conflict (be satisfied).
-            if store[new_incompatibilities].iter().all(not_satisfied) {
-                log::info!("add_decision: {package:?} @ {version}");
-                self.add_decision(package, version);
-            } else {
-                log::info!("not adding {package:?} @ {version} because of its dependencies",);
-            }
+        // Check if any of the dependencies preclude deciding on this crate version.
+        let package_term = Term::exact(version.clone());
+        let relation = |incompat: IncompId<DP::P, DP::VS, DP::M>| {
+            store[incompat].relation(|p| {
+                // The current package isn't part of the package assignments yet.
+                if p == package {
+                    Some(&package_term)
+                } else {
+                    self.term_intersection_for_package(p)
+                }
+            })
+        };
+        if let Some(satisfied) = Id::range_to_iter(new_incompatibilities)
+            .find(|incompat| relation(*incompat) == Relation::Satisfied)
+        {
+            log::info!(
+                "rejecting decision {package:?} @ {version} because its dependencies conflict"
+            );
+            Some(satisfied)
+        } else {
+            log::info!("adding decision: {package:?} @ {version}");
+            self.add_decision(package, version);
+            None
         }
     }
 
