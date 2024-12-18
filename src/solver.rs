@@ -245,7 +245,7 @@ pub fn resolve<DP: DependencyProvider>(
                     conflict_tracker
                         .entry(incompat_package)
                         .or_default()
-                        .unit_propagation_culprit += 1;
+                        .dependencies_culprit += 1;
                 }
             }
         } else {
