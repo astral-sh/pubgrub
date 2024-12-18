@@ -21,7 +21,8 @@ pub(crate) struct State<DP: DependencyProvider> {
     #[allow(clippy::type_complexity)]
     incompatibilities: Map<Id<DP::P>, Vec<IncompDpId<DP>>>,
 
-    /// Store the ids of incompatibilities that are already contradicted.
+    /// As an optimization, store the ids of incompatibilities that are already contradicted.
+    ///
     /// For each one keep track of the decision level when it was found to be contradicted.
     /// These will stay contradicted until we have backtracked beyond its associated decision level.
     contradicted_incompatibilities: Map<IncompDpId<DP>, DecisionLevel>,

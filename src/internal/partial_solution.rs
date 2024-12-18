@@ -30,36 +30,61 @@ impl DecisionLevel {
 #[derive(Clone, Debug)]
 pub(crate) struct PartialSolution<DP: DependencyProvider> {
     next_global_index: u32,
+    /// The number of decisions that have been made, equal to the number of packages with decisions.
     current_decision_level: DecisionLevel,
-    /// `package_assignments` is primarily a HashMap from a package to its
-    /// `PackageAssignments`. But it can also keep the items in an order.
-    ///  We maintain three sections in this order:
-    /// 1. `[..current_decision_level]` Are packages that have had a decision made sorted by the `decision_level`.
-    ///    This makes it very efficient to extract the solution, And to backtrack to a particular decision level.
-    /// 2. `[current_decision_level..changed_this_decision_level]` Are packages that have **not** had there assignments
-    ///    changed since the last time `prioritize` has been called. Within this range there is no sorting.
-    /// 3. `[changed_this_decision_level..]` Contains all packages that **have** had there assignments changed since
-    ///    the last time `prioritize` has been called. The inverse is not necessarily true, some packages in the range
-    ///    did not have a change. Within this range there is no sorting.
+    /// Store for all known package decisions and package derivations.
+    ///
+    /// "assignment" refers to both packages with decisions and package with only derivations and
+    /// no decision yet. We combine this in a single index map, where different sections (of
+    /// indexes) contain package with different level of information, and make a decision moves a
+    /// package from the derivations sections to the decisions section.
+    ///
+    /// `[..current_decision_level]`: Packages that have had a decision made, sorted by the
+    /// `decision_level`. The section is can be seen as the partial solution, it contains a
+    /// mapping from package name to decided version. The sorting makes it very efficient to
+    /// extract the solution, and to backtrack to a particular decision level. The
+    /// `AssignmentsIntersection` is always a `Decision`.
+    ///
+    /// `[prioritize_decision_level..]`: Packages that are dependencies of some other package,
+    /// but have not yet been decided. The `AssignmentsIntersection` is always a `Derivations`, the
+    /// derivations store the obligations from the decided packages. This section has two
+    /// subsections to optimize the number of `prioritize` calls:
+    ///
+    /// `[current_decision_level..prioritize_decision_level]`: The assignments of packages in this
+    /// range have not changed since the last time `prioritize` has been called, their
+    /// priority in `prioritized_potential_packages` is fresh. There is no sorting within this
+    /// range.
+    ///
+    /// `[prioritize_decision_level..]`: The assignments of packages in this range may have changed
+    /// since the last time `prioritize` has been called, their priority in
+    /// `prioritized_potential_packages` needs to be refreshed. There is no sorting within this
+    /// range.
     #[allow(clippy::type_complexity)]
     package_assignments: FnvIndexMap<Id<DP::P>, PackageAssignments<DP::P, DP::VS, DP::M>>,
-    /// `prioritized_potential_packages` is primarily a HashMap from a package with no desition and a positive assignment
-    /// to its `Priority`. But, it also maintains a max heap of packages by `Priority` order.
+    /// Index into `package_assignments` to decide which packages need to be re-prioritized.
+    prioritize_decision_level: usize,
+    /// The undecided packages order by their `Priority`.
+    ///
+    /// The max heap allows quickly `pop`ing the highest priority package.
     prioritized_potential_packages:
         PriorityQueue<Id<DP::P>, DP::Priority, BuildHasherDefault<FxHasher>>,
-    changed_this_decision_level: usize,
+    /// Whether we have never backtracked, to enable fast path optimizations.
     has_ever_backtracked: bool,
 }
 
-/// Package assignments contain the potential decision and derivations
-/// that have already been made for a given package,
-/// as well as the intersection of terms by all of these.
+/// A package assignment is either a decision or a list of (accumulated) derivations without a
+/// decision.
 #[derive(Clone, Debug)]
 struct PackageAssignments<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
-    smallest_decision_level: DecisionLevel,
-    highest_decision_level: DecisionLevel,
-    dated_derivations: SmallVec<DatedDerivation<P, VS, M>>,
+    /// Whether the assigment is a decision or a derivation.
     assignments_intersection: AssignmentsIntersection<VS>,
+    /// All constraints on the package version from previous decisions, accumulated by decision
+    /// level.
+    dated_derivations: SmallVec<DatedDerivation<P, VS, M>>,
+    /// Smallest [`DecisionLevel`] in `dated_derivations`.
+    smallest_decision_level: DecisionLevel,
+    /// Highest [`DecisionLevel`] in `dated_derivations`.
+    highest_decision_level: DecisionLevel,
 }
 
 impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Display
@@ -85,8 +110,13 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Display
 #[derive(Clone, Debug)]
 struct DatedDerivation<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     global_index: u32,
+    /// Only decisions up this level has been used to compute the accumulated term.
     decision_level: DecisionLevel,
     cause: IncompId<P, VS, M>,
+    /// The intersection of all terms up to `decision_level`.
+    ///
+    /// It may not contain all terms of this `decision_level`, there may be more than one
+    /// `DatedDerivation` per decision level.
     accumulated_intersection: Term<VS>,
 }
 
@@ -100,15 +130,25 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Display
 
 #[derive(Clone, Debug)]
 enum AssignmentsIntersection<VS: VersionSet> {
-    Decision((u32, VS::V, Term<VS>)),
+    /// A decision on package for version has been made at the given level.
+    Decision {
+        decision_level: u32,
+        version: VS::V,
+        /// The version, but as positive singleton term.
+        term: Term<VS>,
+    },
     Derivations(Term<VS>),
 }
 
 impl<VS: VersionSet> Display for AssignmentsIntersection<VS> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Decision((lvl, version, _)) => {
-                write!(f, "Decision: level {}, v = {}", lvl, version)
+            Self::Decision {
+                decision_level,
+                version,
+                term: _,
+            } => {
+                write!(f, "Decision: level {}, v = {}", decision_level, version)
             }
             Self::Derivations(term) => write!(f, "Derivations term: {}", term),
         }
@@ -135,7 +175,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             current_decision_level: DecisionLevel(0),
             package_assignments: FnvIndexMap::default(),
             prioritized_potential_packages: PriorityQueue::default(),
-            changed_this_decision_level: 0,
+            prioritize_decision_level: 0,
             has_ever_backtracked: false,
         }
     }
@@ -173,7 +213,9 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                 None => panic!("Derivations must already exist"),
                 Some(pa) => match &pa.assignments_intersection {
                     // Cannot be called when a decision has already been taken.
-                    AssignmentsIntersection::Decision(_) => panic!("Already existing decision"),
+                    AssignmentsIntersection::Decision { .. } => {
+                        panic!("Already existing decision")
+                    }
                     // Cannot be called if the versions is not contained in the terms' intersection.
                     AssignmentsIntersection::Derivations(term) => {
                         debug_assert!(
@@ -187,7 +229,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                 },
             }
             assert_eq!(
-                self.changed_this_decision_level,
+                self.prioritize_decision_level,
                 self.package_assignments.len()
             );
         }
@@ -198,11 +240,11 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             .get_full_mut(&package)
             .expect("Derivations must already exist");
         pa.highest_decision_level = self.current_decision_level;
-        pa.assignments_intersection = AssignmentsIntersection::Decision((
-            self.next_global_index,
-            version.clone(),
-            Term::exact(version),
-        ));
+        pa.assignments_intersection = AssignmentsIntersection::Decision {
+            decision_level: self.next_global_index,
+            version: version.clone(),
+            term: Term::exact(version),
+        };
         // Maintain that the beginning of the `package_assignments` Have all decisions in sorted order.
         if new_idx != old_idx {
             self.package_assignments.swap_indices(new_idx, old_idx);
@@ -233,17 +275,17 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                 pa.highest_decision_level = self.current_decision_level;
                 match &mut pa.assignments_intersection {
                     // Check that add_derivation is never called in the wrong context.
-                    AssignmentsIntersection::Decision(_) => {
+                    AssignmentsIntersection::Decision { .. } => {
                         panic!("add_derivation should not be called after a decision")
                     }
                     AssignmentsIntersection::Derivations(t) => {
                         *t = t.intersection(&dated_derivation.accumulated_intersection);
                         dated_derivation.accumulated_intersection = t.clone();
                         if t.is_positive() {
-                            // we can use `swap_indices` to make `changed_this_decision_level` only go down by 1
+                            // we can use `swap_indices` to make `prioritize_decision_level` only go down by 1
                             // but the copying is slower then the larger search
-                            self.changed_this_decision_level =
-                                std::cmp::min(self.changed_this_decision_level, idx);
+                            self.prioritize_decision_level =
+                                std::cmp::min(self.prioritize_decision_level, idx);
                         }
                     }
                 }
@@ -252,8 +294,8 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             Entry::Vacant(v) => {
                 let term = dated_derivation.accumulated_intersection.clone();
                 if term.is_positive() {
-                    self.changed_this_decision_level =
-                        std::cmp::min(self.changed_this_decision_level, pa_last_index);
+                    self.prioritize_decision_level =
+                        std::cmp::min(self.prioritize_decision_level, pa_last_index);
                 }
                 v.insert(PackageAssignments {
                     smallest_decision_level: self.current_decision_level,
@@ -270,12 +312,12 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         &mut self,
         prioritizer: impl Fn(Id<DP::P>, &DP::VS) -> DP::Priority,
     ) -> Option<Id<DP::P>> {
-        let check_all = self.changed_this_decision_level
+        let check_all = self.prioritize_decision_level
             == self.current_decision_level.0.saturating_sub(1) as usize;
         let current_decision_level = self.current_decision_level;
         let prioritized_potential_packages = &mut self.prioritized_potential_packages;
         self.package_assignments
-            .get_range(self.changed_this_decision_level..)
+            .get_range(self.prioritize_decision_level..)
             .unwrap()
             .iter()
             .filter(|(_, pa)| {
@@ -290,7 +332,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                 let priority = prioritizer(p, r);
                 prioritized_potential_packages.push(p, priority);
             });
-        self.changed_this_decision_level = self.package_assignments.len();
+        self.prioritize_decision_level = self.package_assignments.len();
         prioritized_potential_packages.pop().map(|(p, _)| p)
     }
 
@@ -302,7 +344,11 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             .iter()
             .take(self.current_decision_level.0 as usize)
             .map(|(&p, pa)| match &pa.assignments_intersection {
-                AssignmentsIntersection::Decision((_, v, _)) => (p, v.clone()),
+                AssignmentsIntersection::Decision {
+                    decision_level: _,
+                    version: v,
+                    term: _,
+                } => (p, v.clone()),
                 AssignmentsIntersection::Derivations(_) => {
                     panic!("Derivations in the Decision part")
                 }
@@ -347,7 +393,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         });
         // Throw away all stored priority levels, And mark that they all need to be recomputed.
         self.prioritized_potential_packages.clear();
-        self.changed_this_decision_level = self.current_decision_level.0.saturating_sub(1) as usize;
+        self.prioritize_decision_level = self.current_decision_level.0.saturating_sub(1) as usize;
         self.has_ever_backtracked = true;
     }
 
@@ -484,7 +530,11 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         } else {
             match &satisfier_pa.assignments_intersection {
                 AssignmentsIntersection::Derivations(_) => panic!("must be a decision"),
-                AssignmentsIntersection::Decision((_, _, term)) => term.clone(),
+                AssignmentsIntersection::Decision {
+                    decision_level: _,
+                    version: _,
+                    term,
+                } => term.clone(),
             }
         };
 
@@ -532,9 +582,11 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> PackageAssignm
         // If it wasn't found in the derivations,
         // it must be the decision which is last (if called in the right context).
         match &self.assignments_intersection {
-            AssignmentsIntersection::Decision((global_index, _, _)) => {
-                (None, *global_index, self.highest_decision_level)
-            }
+            AssignmentsIntersection::Decision {
+                decision_level: global_index,
+                version: _,
+                term: _,
+            } => (None, *global_index, self.highest_decision_level),
             AssignmentsIntersection::Derivations(accumulated_intersection) => {
                 unreachable!(
                     concat!(
@@ -555,7 +607,11 @@ impl<VS: VersionSet> AssignmentsIntersection<VS> {
     /// Returns the term intersection of all assignments (decision included).
     fn term(&self) -> &Term<VS> {
         match self {
-            Self::Decision((_, _, term)) => term,
+            Self::Decision {
+                decision_level: _,
+                version: _,
+                term,
+            } => term,
             Self::Derivations(term) => term,
         }
     }
@@ -566,7 +622,7 @@ impl<VS: VersionSet> AssignmentsIntersection<VS> {
     /// in the partial solution.
     fn potential_package_filter<P: Package>(&self, package: Id<P>) -> Option<(Id<P>, &VS)> {
         match self {
-            Self::Decision(_) => None,
+            Self::Decision { .. } => None,
             Self::Derivations(term_intersection) => {
                 if term_intersection.is_positive() {
                     Some((package, term_intersection.unwrap_positive()))
