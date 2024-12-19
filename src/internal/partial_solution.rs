@@ -3,6 +3,7 @@
 //! A Memory acts like a structured partial solution
 //! where terms are regrouped by package in a [Map](crate::type_aliases::Map).
 
+use std::cmp::Reverse;
 use std::fmt::{Debug, Display};
 use std::hash::BuildHasherDefault;
 
@@ -66,8 +67,12 @@ pub(crate) struct PartialSolution<DP: DependencyProvider> {
     /// The undecided packages order by their `Priority`.
     ///
     /// The max heap allows quickly `pop`ing the highest priority package.
+    ///
+    /// The `Reverse<u32>` is the discovery order of packages used as tiebreaker. Its order is that
+    /// of a breadth-first search.
+    #[allow(clippy::type_complexity)]
     prioritized_potential_packages:
-        PriorityQueue<Id<DP::P>, DP::Priority, BuildHasherDefault<FxHasher>>,
+        PriorityQueue<Id<DP::P>, (DP::Priority, Reverse<u32>), BuildHasherDefault<FxHasher>>,
     /// Whether we have never backtracked, to enable fast path optimizations.
     has_ever_backtracked: bool,
 }
@@ -330,7 +335,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             .filter_map(|(&p, pa)| pa.assignments_intersection.potential_package_filter(p))
             .for_each(|(p, r)| {
                 let priority = prioritizer(p, r);
-                prioritized_potential_packages.push(p, priority);
+                prioritized_potential_packages.push(p, (priority, Reverse(p.into_raw() as u32)));
             });
         self.prioritize_decision_level = self.package_assignments.len();
         prioritized_potential_packages.pop().map(|(p, _)| p)
