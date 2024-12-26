@@ -133,7 +133,7 @@ impl<DP: DependencyProvider> State<DP> {
         &mut self,
         package: Id<DP::P>,
     ) -> Result<SmallVec<(Id<DP::P>, IncompDpId<DP>)>, NoSolutionError<DP>> {
-        let mut root_causes = SmallVec::default();
+        let mut satisfier_causes = SmallVec::default();
         self.unit_propagation_buffer.clear();
         self.unit_propagation_buffer.push(package);
         while let Some(current_package) = self.unit_propagation_buffer.pop() {
@@ -186,12 +186,11 @@ impl<DP: DependencyProvider> State<DP> {
                 }
             }
             if let Some(incompat_id) = conflict_id {
-                let (package_almost, root_cause) =
-                    self.conflict_resolution(incompat_id)
-                        .map_err(|terminal_incompat_id| {
-                            self.build_derivation_tree(terminal_incompat_id)
-                        })?;
-                root_causes.push((package, root_cause));
+                let (package_almost, root_cause) = self
+                    .conflict_resolution(incompat_id, &mut satisfier_causes)
+                    .map_err(|terminal_incompat_id| {
+                        self.build_derivation_tree(terminal_incompat_id)
+                    })?;
                 self.unit_propagation_buffer.clear();
                 self.unit_propagation_buffer.push(package_almost);
                 // Add to the partial solution with incompat as cause.
@@ -207,16 +206,45 @@ impl<DP: DependencyProvider> State<DP> {
             }
         }
         // If there are no more changed packages, unit propagation is done.
-        Ok(root_causes)
+        Ok(satisfier_causes)
     }
 
-    /// Return the root cause or the terminal incompatibility.
-    /// CF <https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation>
+    /// Return the root cause or the terminal incompatibility. CF
+    /// <https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation>
+    ///
+    /// When we found a conflict, we want to learn as much as possible from it, to avoid making (or
+    /// keeping) decisions that will be rejected. Say we found that the dependency requirements on X and the
+    /// dependency requirements on Y are incompatible. We may find that the decisions on earlier packages B and C
+    /// require us to make incompatible requirements on X and Y, so we backtrack until either B or C
+    /// can be revisited. To make it practical, we really only need one of the terms to be a
+    /// decision. We may as well leave the other terms general. Something like "the dependency on
+    /// the package X is incompatible with the decision on C" tends to work out pretty well. Then if
+    /// A turns out to also have a dependency on X the resulting root cause is still useful.
+    /// (`unit_propagation` will ensure we don't try that version of C.)
+    /// Of course, this is more heuristics than science. If the output is too general, then
+    /// `unit_propagation` will handle the confusion by calling us again with the next most specific
+    /// conflict it comes across. If the output is too specific, then the outer `solver` loop will
+    /// eventually end up calling us again until all possibilities are enumerated.
+    ///
+    /// To end up with a more useful incompatibility, this function combines incompatibilities into
+    /// derivations. Fulfilling this derivation implies the later conflict. By banning it, we
+    /// prevent the intermediate steps from occurring again, at least in the exact same way.
+    /// However, the statistics collected for `prioritize` may want to analyze those intermediate
+    /// steps. For example we might start with "there is no version 1 of Z", and
+    /// `conflict_resolution` may be able to determine that "that was inevitable when we picked
+    /// version 1 of X" which was inevitable when we picked W and so on, until version 1 of B, which
+    /// was depended on by version 1 of A. Therefore the root cause may simplify all the way down to
+    /// "we cannot pick version 1 of A". This will prevent us going down this path again. However
+    /// when we start looking at version 2 of A, and discover that it depends on version 2 of B, we
+    /// will want to prioritize the chain of intermediate steps to check if it has a problem with
+    /// the same shape. The `satisfier_causes` argument keeps track of these intermediate steps so
+    /// that the caller can use them for prioritization.
     #[allow(clippy::type_complexity)]
     #[cold]
     fn conflict_resolution(
         &mut self,
         incompatibility: IncompDpId<DP>,
+        satisfier_causes: &mut SmallVec<(Id<DP::P>, IncompDpId<DP>)>,
     ) -> Result<(Id<DP::P>, IncompDpId<DP>), IncompDpId<DP>> {
         let mut current_incompat_id = incompatibility;
         let mut current_incompat_changed = false;
@@ -240,6 +268,7 @@ impl<DP: DependencyProvider> State<DP> {
                             previous_satisfier_level,
                         );
                         log::info!("backtrack to {:?}", previous_satisfier_level);
+                        satisfier_causes.push((package, current_incompat_id));
                         return Ok((package, current_incompat_id));
                     }
                     SatisfierSearch::SameDecisionLevels { satisfier_cause } => {
@@ -251,6 +280,7 @@ impl<DP: DependencyProvider> State<DP> {
                         );
                         log::info!("prior cause: {}", prior_cause.display(&self.package_store));
                         current_incompat_id = self.incompatibility_store.alloc(prior_cause);
+                        satisfier_causes.push((package, current_incompat_id));
                         current_incompat_changed = true;
                     }
                 }
