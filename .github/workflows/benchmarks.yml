@@ -10,7 +10,7 @@ on:
 jobs:
   benchmarks:
     name: Run benchmarks
-    runs-on: ubuntu-latest
+    runs-on: codspeed-macro
     steps:
       - uses: actions/checkout@v4
       - name: Setup rust toolchain, cache and cargo-codspeed binary
