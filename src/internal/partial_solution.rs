@@ -367,6 +367,25 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         None
     }
 
+    /// Manually update a package priority that changed independent of the range.
+    pub fn update_priority(&mut self, package: Id<DP::P>, priority: DP::Priority) {
+        if self
+            .package_assignments
+            .get(&package)
+            .and_then(|assignment| {
+                assignment
+                    .assignments_intersection
+                    .potential_package_filter()
+            })
+            .is_none()
+        {
+            // Only prioritize packages up for decision
+            return;
+        }
+        self.prioritized_potential_packages
+            .push(package, (priority, Reverse(package.into_raw() as u32)));
+    }
+
     /// If a partial solution has, for every positive derivation,
     /// a corresponding decision that satisfies that assignment,
     /// it's a total solution and version solving has succeeded.
