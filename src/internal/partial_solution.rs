@@ -16,6 +16,7 @@ use crate::internal::{
 use crate::{DependencyProvider, Package, Term, VersionSet};
 
 type FnvIndexMap<K, V> = indexmap::IndexMap<K, V, BuildHasherDefault<FxHasher>>;
+type FnvIndexSet<T> = indexmap::IndexSet<T, BuildHasherDefault<FxHasher>>;
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub(crate) struct DecisionLevel(pub(crate) u32);
@@ -62,8 +63,6 @@ pub(crate) struct PartialSolution<DP: DependencyProvider> {
     /// range.
     #[allow(clippy::type_complexity)]
     package_assignments: FnvIndexMap<Id<DP::P>, PackageAssignments<DP::P, DP::VS, DP::M>>,
-    /// Index into `package_assignments` to decide which packages need to be re-prioritized.
-    prioritize_decision_level: usize,
     /// The undecided packages order by their `Priority`.
     ///
     /// The max heap allows quickly `pop`ing the highest priority package.
@@ -73,6 +72,9 @@ pub(crate) struct PartialSolution<DP: DependencyProvider> {
     #[allow(clippy::type_complexity)]
     prioritized_potential_packages:
         PriorityQueue<Id<DP::P>, (DP::Priority, Reverse<u32>), BuildHasherDefault<FxHasher>>,
+    /// Packages whose derivations changed since the last time `prioritize` was called and need
+    /// their priorities to be updated.
+    outdated_priorities: FnvIndexSet<Id<DP::P>>,
     /// Whether we have never backtracked, to enable fast path optimizations.
     has_ever_backtracked: bool,
 }
@@ -180,7 +182,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             current_decision_level: DecisionLevel(0),
             package_assignments: FnvIndexMap::default(),
             prioritized_potential_packages: PriorityQueue::default(),
-            prioritize_decision_level: 0,
+            outdated_priorities: FnvIndexSet::default(),
             has_ever_backtracked: false,
         }
     }
@@ -233,10 +235,6 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                     }
                 },
             }
-            assert_eq!(
-                self.prioritize_decision_level,
-                self.package_assignments.len()
-            );
         }
         let new_idx = self.current_decision_level.0 as usize;
         self.current_decision_level = self.current_decision_level.increment();
@@ -272,10 +270,8 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             accumulated_intersection: store[cause].get(package).unwrap().negate(),
         };
         self.next_global_index += 1;
-        let pa_last_index = self.package_assignments.len().saturating_sub(1);
         match self.package_assignments.entry(package) {
             Entry::Occupied(mut occupied) => {
-                let idx = occupied.index();
                 let pa = occupied.get_mut();
                 pa.highest_decision_level = self.current_decision_level;
                 match &mut pa.assignments_intersection {
@@ -287,10 +283,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                         *t = t.intersection(&dated_derivation.accumulated_intersection);
                         dated_derivation.accumulated_intersection = t.clone();
                         if t.is_positive() {
-                            // we can use `swap_indices` to make `prioritize_decision_level` only go down by 1
-                            // but the copying is slower then the larger search
-                            self.prioritize_decision_level =
-                                std::cmp::min(self.prioritize_decision_level, idx);
+                            self.outdated_priorities.insert(package);
                         }
                     }
                 }
@@ -299,8 +292,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             Entry::Vacant(v) => {
                 let term = dated_derivation.accumulated_intersection.clone();
                 if term.is_positive() {
-                    self.prioritize_decision_level =
-                        std::cmp::min(self.prioritize_decision_level, pa_last_index);
+                    self.outdated_priorities.insert(package);
                 }
                 v.insert(PackageAssignments {
                     smallest_decision_level: self.current_decision_level,
@@ -316,29 +308,27 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
     pub(crate) fn pick_highest_priority_pkg(
         &mut self,
         mut prioritizer: impl FnMut(Id<DP::P>, &DP::VS) -> DP::Priority,
-    ) -> Option<Id<DP::P>> {
-        let check_all = self.prioritize_decision_level
-            == self.current_decision_level.0.saturating_sub(1) as usize;
-        let current_decision_level = self.current_decision_level;
+    ) -> Option<(Id<DP::P>, &DP::VS)> {
         let prioritized_potential_packages = &mut self.prioritized_potential_packages;
-        self.package_assignments
-            .get_range(self.prioritize_decision_level..)
-            .unwrap()
-            .iter()
-            .filter(|(_, pa)| {
-                // We only actually need to update the package if it has been changed
-                // since the last time we called prioritize.
-                // Which means it's highest decision level is the current decision level,
-                // or if we backtracked in the meantime.
-                check_all || pa.highest_decision_level == current_decision_level
-            })
-            .filter_map(|(&p, pa)| pa.assignments_intersection.potential_package_filter(p))
-            .for_each(|(p, r)| {
-                let priority = prioritizer(p, r);
-                prioritized_potential_packages.push(p, (priority, Reverse(p.into_raw() as u32)));
-            });
-        self.prioritize_decision_level = self.package_assignments.len();
-        prioritized_potential_packages.pop().map(|(p, _)| p)
+        while let Some(p) = self.outdated_priorities.pop() {
+            let Some(pa) = self.package_assignments.get(&p) else {
+                continue;
+            };
+            let Some(r) = pa.assignments_intersection.potential_package_filter() else {
+                continue;
+            };
+            let priority = prioritizer(p, r);
+            prioritized_potential_packages.push(p, (priority, Reverse(p.into_raw() as u32)));
+        }
+        while let Some(p) = self.prioritized_potential_packages.pop().map(|(p, _)| p) {
+            let Some(pa) = self.package_assignments.get(&p) else {
+                continue;
+            };
+            if let Some(r) = pa.assignments_intersection.potential_package_filter() {
+                return Some((p, r));
+            }
+        }
+        None
     }
 
     /// If a partial solution has, for every positive derivation,
@@ -378,12 +368,20 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
     /// Backtrack the partial solution to a given decision level.
     pub(crate) fn backtrack(&mut self, decision_level: DecisionLevel) {
         self.current_decision_level = decision_level;
-        self.package_assignments.retain(|_, pa| {
+        self.package_assignments.retain(|p, pa| {
             if pa.smallest_decision_level > decision_level {
                 // Remove all entries that have a smallest decision level higher than the backtrack target.
                 false
             } else if pa.highest_decision_level <= decision_level {
                 // Do not change entries older than the backtrack decision level target.
+                if pa
+                    .assignments_intersection
+                    .potential_package_filter()
+                    .is_some()
+                    && self.prioritized_potential_packages.get(p).is_none()
+                {
+                    self.outdated_priorities.insert(*p);
+                }
                 true
             } else {
                 // smallest_decision_level <= decision_level < highest_decision_level
@@ -408,12 +406,15 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                 // Reset the assignments intersection.
                 pa.assignments_intersection =
                     AssignmentsIntersection::Derivations(last.accumulated_intersection.clone());
+
+                self.prioritized_potential_packages.remove(p);
+                if pa.assignments_intersection.term().is_positive() {
+                    self.outdated_priorities.insert(*p);
+                }
                 true
             }
         });
-        // Throw away all stored priority levels, And mark that they all need to be recomputed.
-        self.prioritized_potential_packages.clear();
-        self.prioritize_decision_level = self.current_decision_level.0.saturating_sub(1) as usize;
+        // Throw away all stored priority levels and mark them for recomputing
         self.has_ever_backtracked = true;
     }
 
@@ -648,12 +649,12 @@ impl<VS: VersionSet> AssignmentsIntersection<VS> {
     /// selected version (no "decision")
     /// and if it contains at least one positive derivation term
     /// in the partial solution.
-    fn potential_package_filter<P: Package>(&self, package: Id<P>) -> Option<(Id<P>, &VS)> {
+    fn potential_package_filter(&self) -> Option<&VS> {
         match self {
             Self::Decision { .. } => None,
             Self::Derivations(term_intersection) => {
                 if term_intersection.is_positive() {
-                    Some((package, term_intersection.unwrap_positive()))
+                    Some(term_intersection.unwrap_positive())
                 } else {
                     None
                 }

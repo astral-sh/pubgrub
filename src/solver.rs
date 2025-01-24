@@ -66,7 +66,9 @@ use std::fmt::{Debug, Display};
 use log::{debug, info};
 
 use crate::internal::{Id, Incompatibility, State};
-use crate::{DependencyConstraints, Map, Package, PubGrubError, SelectedDependencies, VersionSet};
+use crate::{
+    DependencyConstraints, Map, Package, PubGrubError, SelectedDependencies, Term, VersionSet,
+};
 
 /// Statistics on how often a package conflicted with other packages.
 #[derive(Debug, Default, Clone)]
@@ -148,7 +150,7 @@ pub fn resolve<DP: DependencyProvider>(
             state.partial_solution.display(&state.package_store)
         );
 
-        let Some(highest_priority_pkg) =
+        let Some((highest_priority_pkg, term_intersection)) =
             state.partial_solution.pick_highest_priority_pkg(|p, r| {
                 dependency_provider.prioritize(
                     &state.package_store[p],
@@ -165,17 +167,8 @@ pub fn resolve<DP: DependencyProvider>(
         };
         next = highest_priority_pkg;
 
-        let term_intersection = state
-            .partial_solution
-            .term_intersection_for_package(next)
-            .ok_or_else(|| {
-                PubGrubError::Failure("a package was chosen but we don't have a term.".into())
-            })?;
         let decision = dependency_provider
-            .choose_version(
-                &state.package_store[next],
-                term_intersection.unwrap_positive(),
-            )
+            .choose_version(&state.package_store[next], term_intersection)
             .map_err(PubGrubError::ErrorChoosingPackageVersion)?;
 
         info!(
@@ -186,7 +179,8 @@ pub fn resolve<DP: DependencyProvider>(
         // Pick the next compatible version.
         let v = match decision {
             None => {
-                let inc = Incompatibility::no_versions(next, term_intersection.clone());
+                let inc =
+                    Incompatibility::no_versions(next, Term::Positive(term_intersection.clone()));
                 state.add_incompatibility(inc);
                 continue;
             }
