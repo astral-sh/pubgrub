@@ -309,10 +309,10 @@ pub trait DependencyProvider {
     ///
     /// Decisions are always made for the highest priority package first. The order of decisions
     /// determines which solution is chosen and can drastically change the performances of the
-    /// solver. If there is a conflict between two package versions, the package with the higher
-    /// priority is preserved and the lower priority gets discarded. Usually, you want to decide
-    /// more certain packages (e.g. those with a single version constraint) and packages with more
-    /// conflicts first.
+    /// solver. If there is a conflict between two package versions, the decision for the package
+    /// with the higher priority is preserved and while the decision for the package with the lower
+    /// priority gets discarded. Usually, you want to decide more certain packages (e.g. those with
+    /// a single version constraint) and packages with more conflicts first.
     ///
     /// The `package_conflicts_counts` argument provides access to some other heuristics that
     /// are production users have found useful. Although the exact meaning/efficacy of those
