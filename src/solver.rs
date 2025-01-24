@@ -169,7 +169,10 @@ pub fn resolve<DP: DependencyProvider>(
             .partial_solution
             .term_intersection_for_package(next)
             .ok_or_else(|| {
-                PubGrubError::Failure("a package was chosen but we don't have a term.".into())
+                PubGrubError::Failure(format!(
+                    "package {} was chosen but we don't have a term.",
+                    next.into_raw()
+                ))
             })?;
         let decision = dependency_provider
             .choose_version(
