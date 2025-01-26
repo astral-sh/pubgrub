@@ -22,38 +22,50 @@ use std::fmt::{Debug, Display};
 
 use crate::Ranges;
 
-/// Trait describing sets of versions.
+/// A set of versions.
+///
+/// See [`Ranges`] for an implementation.
+///
+/// Two version sets that contain the same versions must be equal.
+///
+/// The methods with default implementations can be overwritten for better performance, but they
+/// must be equal to the default implementation.
 pub trait VersionSet: Debug + Display + Clone + Eq {
     /// Version type associated with the sets manipulated.
     type V: Debug + Display + Clone + Ord;
 
     // Constructors
-    /// Constructor for an empty set containing no version.
+
+    /// An empty set containing no version.
     fn empty() -> Self;
-    /// Constructor for a set containing exactly one version.
+
+    /// A set containing only the given version.
     fn singleton(v: Self::V) -> Self;
 
     // Operations
-    /// Compute the complement of this set.
+
+    /// The set of all version that are not in this set.
     fn complement(&self) -> Self;
-    /// Compute the intersection with another set.
+
+    /// The set of all versions that are in both sets.
     fn intersection(&self, other: &Self) -> Self;
 
-    // Membership
-    /// Evaluate membership of a version in this set.
+    /// Whether the version is part of this set.
     fn contains(&self, v: &Self::V) -> bool;
 
-    // Automatically implemented functions ###########################
+    // Automatically implemented functions
 
-    /// Constructor for the set containing all versions.
-    /// Automatically implemented as `Self::empty().complement()`.
+    /// The set containing all versions.
+    ///
+    /// The default implementation is the complement of the empty set.
     fn full() -> Self {
         Self::empty().complement()
     }
 
-    /// Compute the union with another set.
-    /// Thanks to set properties, this is automatically implemented as:
-    /// `self.complement().intersection(&other.complement()).complement()`
+    /// The set of all versions that are either (or both) of the sets.
+    ///
+    /// The default implementation is complement of the intersection of the complements of both sets
+    /// (De Morgan's law).
     fn union(&self, other: &Self) -> Self {
         self.complement()
             .intersection(&other.complement())
@@ -71,6 +83,7 @@ pub trait VersionSet: Debug + Display + Clone + Eq {
     }
 }
 
+/// [`Ranges`] contains optimized implementations of all operations.
 impl<T: Debug + Display + Clone + Eq + Ord> VersionSet for Ranges<T> {
     type V = T;
 
