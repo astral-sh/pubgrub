@@ -50,9 +50,11 @@ impl<T> fmt::Debug for Id<T> {
 }
 
 impl<T> Id<T> {
-    pub(crate) fn into_raw(self) -> usize {
+    /// The id as index.
+    pub fn into_raw(self) -> usize {
         self.raw as usize
     }
+
     fn from(n: u32) -> Self {
         Self {
             raw: n,
