@@ -11,16 +11,16 @@ env:
 
 jobs:
   test:
-    name: Tests pass
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --verbose --workspace
-      - run: cargo test --all-features --workspace --verbose
+      - run: cargo build --workspace
+      - run: cargo test --all-features --workspace
 
   clippy:
-    name: No warnings from Clippy
+    name: Clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +33,7 @@ jobs:
         run: cargo clippy --workspace
 
   check_formatting:
-    name: Source code is formatted
+    name: Formatting
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +43,7 @@ jobs:
       - run: cargo fmt --all -- --check
 
   check_documentation:
-    name: Documentation builds successfully
+    name: Docs
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -52,3 +52,13 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --no-deps --document-private-items
+
+  minimal-versions:
+    name: Minimal versions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo +nightly update -Zminimal-versions
+      - run: cargo +nightly build --workspace
+      - run: cargo +nightly test --all-features --workspace
