@@ -188,9 +188,10 @@ pub fn resolve<DP: DependencyProvider>(
         };
 
         if !term_intersection.contains(&v) {
-            return Err(PubGrubError::Failure(
-                "choose_package_version picked an incompatible version".into(),
-            ));
+            panic!(
+                "`choose_version` picked an incompatible version for package {}, {} is not in {}",
+                state.package_store[next], v, term_intersection
+            );
         }
 
         let is_new_dependency = added_dependencies
