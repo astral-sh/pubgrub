@@ -169,7 +169,10 @@ pub fn resolve<DP: DependencyProvider>(
 
         let decision = dependency_provider
             .choose_version(&state.package_store[next], term_intersection)
-            .map_err(PubGrubError::ErrorChoosingPackageVersion)?;
+            .map_err(|err| PubGrubError::ErrorChoosingVersion {
+                package: state.package_store[next].clone(),
+                source: err,
+            })?;
 
         info!(
             "DP chose: {:?} = '{}' @ {:?}",
