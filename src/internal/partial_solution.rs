@@ -37,9 +37,9 @@ pub(crate) struct PartialSolution<DP: DependencyProvider> {
     /// Store for all known package decisions and package derivations.
     ///
     /// "assignment" refers to both packages with decisions and package with only derivations and
-    /// no decision yet. We combine this in a single index map, where different sections (of
-    /// indexes) contain package with different level of information, and make a decision moves a
-    /// package from the derivations sections to the decisions section.
+    /// no decision yet. We combine this in a single index map with a decisions section in front and
+    /// a derivations sections in the back, where making a decision moves a package from the
+    /// derivations sections to the decisions section.
     ///
     /// `[..current_decision_level]`: Packages that have had a decision made, sorted by the
     /// `decision_level`. The section is can be seen as the partial solution, it contains a
@@ -47,20 +47,9 @@ pub(crate) struct PartialSolution<DP: DependencyProvider> {
     /// extract the solution, and to backtrack to a particular decision level. The
     /// `AssignmentsIntersection` is always a `Decision`.
     ///
-    /// `[prioritize_decision_level..]`: Packages that are dependencies of some other package,
+    /// `[current_decision_level..]`: Packages that are dependencies of some other package,
     /// but have not yet been decided. The `AssignmentsIntersection` is always a `Derivations`, the
-    /// derivations store the obligations from the decided packages. This section has two
-    /// subsections to optimize the number of `prioritize` calls:
-    ///
-    /// `[current_decision_level..prioritize_decision_level]`: The assignments of packages in this
-    /// range have not changed since the last time `prioritize` has been called, their
-    /// priority in `prioritized_potential_packages` is fresh. There is no sorting within this
-    /// range.
-    ///
-    /// `[prioritize_decision_level..]`: The assignments of packages in this range may have changed
-    /// since the last time `prioritize` has been called, their priority in
-    /// `prioritized_potential_packages` needs to be refreshed. There is no sorting within this
-    /// range.
+    /// derivations store the obligations from the decided packages.
     #[allow(clippy::type_complexity)]
     package_assignments: FnvIndexMap<Id<DP::P>, PackageAssignments<DP::P, DP::VS, DP::M>>,
     /// The undecided packages order by their `Priority`.
@@ -414,7 +403,6 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                 true
             }
         });
-        // Throw away all stored priority levels and mark them for recomputing
         self.has_ever_backtracked = true;
     }
 
