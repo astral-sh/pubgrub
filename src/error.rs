@@ -42,10 +42,6 @@ pub enum PubGrubError<DP: DependencyProvider> {
     /// returned an error in the method [should_cancel](DependencyProvider::should_cancel).
     #[error("We should cancel")]
     ErrorInShouldCancel(#[source] DP::Err),
-
-    /// Something unexpected happened.
-    #[error("{0}")]
-    Failure(String),
 }
 
 impl<DP: DependencyProvider> From<NoSolutionError<DP>> for PubGrubError<DP> {
@@ -78,7 +74,6 @@ where
             Self::ErrorInShouldCancel(arg0) => {
                 f.debug_tuple("ErrorInShouldCancel").field(arg0).finish()
             }
-            Self::Failure(arg0) => f.debug_tuple("Failure").field(arg0).finish(),
         }
     }
 }
