@@ -295,13 +295,6 @@ pub trait DependencyProvider {
     /// assign [`String`] as placeholder.
     type M: Eq + Clone + Debug + Display;
 
-    /// The type returned from `prioritize`. The resolver does not care what type this is
-    /// as long as it can pick a largest one and clone it.
-    ///
-    /// [`Reverse`](std::cmp::Reverse) can be useful if you want to pick the package with
-    /// the fewest versions that match the outstanding constraint.
-    type Priority: Ord + Clone;
-
     /// The kind of error returned from these methods.
     ///
     /// Returning this signals that resolution should fail with this error.
