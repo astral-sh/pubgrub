@@ -28,8 +28,8 @@ use crate::Ranges;
 ///
 /// Two version sets that contain the same versions must be equal.
 ///
-/// The methods with default implementations can be overwritten for better performance, but they
-/// must be equal to the default implementation.
+/// The methods with default implementations can be overwritten for better performance, but their
+/// output must be equal to the default implementation.
 pub trait VersionSet: Debug + Display + Clone + Eq {
     /// Version type associated with the sets manipulated.
     type V: Debug + Display + Clone + Ord;

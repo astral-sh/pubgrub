@@ -55,7 +55,7 @@ pub struct Derived<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> 
     pub terms: Map<P, Term<VS>>,
     /// Indicate if the incompatibility is present multiple times in the derivation tree.
     ///
-    /// If that is the case, the number is a unique id. We may want to only explain this
+    /// If that is the case, the number is a unique id. This can be used to only explain this
     /// incompatibility once, then refer to the explanation for the other times.
     pub shared_id: Option<usize>,
     /// First cause.
