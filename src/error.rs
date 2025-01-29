@@ -17,30 +17,34 @@ pub type NoSolutionError<DP> = DerivationTree<
 #[derive(Error)]
 pub enum PubGrubError<DP: DependencyProvider> {
     /// There is no solution for this set of dependencies.
-    #[error("No solution")]
+    #[error("There is no solution")]
     NoSolution(NoSolutionError<DP>),
 
     /// Error arising when the implementer of [DependencyProvider] returned an error in the method
-    /// [get_dependencies](DependencyProvider::get_dependencies).
+    /// [`get_dependencies`](DependencyProvider::get_dependencies).
     #[error("Retrieving dependencies of {package} {version} failed")]
     ErrorRetrievingDependencies {
         /// Package whose dependencies we want.
         package: DP::P,
         /// Version of the package for which we want the dependencies.
         version: DP::V,
-        /// Error raised by the implementer of
-        /// [DependencyProvider].
+        /// Error raised by the implementer of [DependencyProvider].
         source: DP::Err,
     },
 
     /// Error arising when the implementer of [DependencyProvider] returned an error in the method
-    /// [choose_version](DependencyProvider::choose_version).
-    #[error("Decision making failed")]
-    ErrorChoosingPackageVersion(#[source] DP::Err),
+    /// [`choose_version`](DependencyProvider::choose_version).
+    #[error("Choosing a version for {package} failed")]
+    ErrorChoosingVersion {
+        /// Package to choose a version for.
+        package: DP::P,
+        /// Error raised by the implementer of [DependencyProvider].
+        source: DP::Err,
+    },
 
     /// Error arising when the implementer of [DependencyProvider]
-    /// returned an error in the method [should_cancel](DependencyProvider::should_cancel).
-    #[error("We should cancel")]
+    /// returned an error in the method [`should_cancel`](DependencyProvider::should_cancel).
+    #[error("The solver was cancelled")]
     ErrorInShouldCancel(#[source] DP::Err),
 }
 
@@ -67,9 +71,10 @@ where
                 .field("version", version)
                 .field("source", source)
                 .finish(),
-            Self::ErrorChoosingPackageVersion(arg0) => f
-                .debug_tuple("ErrorChoosingPackageVersion")
-                .field(arg0)
+            Self::ErrorChoosingVersion { package, source } => f
+                .debug_struct("ErrorChoosingVersion")
+                .field("package", package)
+                .field("source", source)
                 .finish(),
             Self::ErrorInShouldCancel(arg0) => {
                 f.debug_tuple("ErrorInShouldCancel").field(arg0).finish()
