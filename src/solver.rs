@@ -288,43 +288,6 @@ pub trait DependencyProvider {
     /// assign [`String`] as placeholder.
     type M: Eq + Clone + Debug + Display;
 
-    /// [Decision making](https://github.com/dart-lang/pub/blob/master/doc/solver.md#decision-making)
-    /// is the process of choosing the next package
-    /// and version that will be appended to the partial solution.
-    ///
-    /// Every time such a decision must be made, the resolver looks at all the potential valid
-    /// packages that have changed, and a asks the dependency provider how important each one is.
-    /// For each one it calls `prioritize` with the name of the package and the current set of
-    /// acceptable versions.
-    /// The resolver will then pick the package with the highes priority from all the potential valid
-    /// packages.
-    ///
-    /// The strategy employed to prioritize packages
-    /// cannot change the existence of a solution or not,
-    /// but can drastically change the performances of the solver,
-    /// or the properties of the solution.
-    /// The documentation of Pub (PubGrub implementation for the dart programming language)
-    /// states the following:
-    ///
-    /// > Pub chooses the latest matching version of the package
-    /// > with the fewest versions that match the outstanding constraint.
-    /// > This tends to find conflicts earlier if any exist,
-    /// > since these packages will run out of versions to try more quickly.
-    /// > But there's likely room for improvement in these heuristics.
-    ///
-    /// The `package_conflicts_counts` argument provides access to some other heuristics that
-    /// are production users have found useful. Although the exact meaning/efficacy of those arguments may change.
-    ///
-    /// If two packages have the same priority, PubGrub will biased toward a breadth first search.
-    ///
-    /// Note: the resolver may call this even when the range has not changed,
-    /// if it is more efficient for the resolvers internal data structures.
-    fn prioritize(
-        &self,
-        package: &Self::P,
-        range: &Self::VS,
-        package_conflicts_counts: &PackageResolutionStatistics,
-    ) -> Self::Priority;
     /// The type returned from `prioritize`. The resolver does not care what type this is
     /// as long as it can pick a largest one and clone it.
     ///
@@ -336,6 +299,33 @@ pub trait DependencyProvider {
     ///
     /// Returning this signals that resolution should fail with this error.
     type Err: Error + 'static;
+
+    /// Determine the order in which versions are chosen for packages.
+    ///
+    /// Decisions are always made for the highest priority package first. The order of decisions
+    /// determines which solution is chosen and can drastically change the performances of the
+    /// solver. If there is a conflict between two package versions, decisions will be backtracked
+    /// until the lower priority package version is discarded preserving the higher priority
+    /// package. Usually, you want to decide more certain packages (e.g. those with a single version
+    /// constraint) and packages with more conflicts first.
+    ///
+    /// The `package_conflicts_counts` argument provides access to some other heuristics that
+    /// are production users have found useful. Although the exact meaning/efficacy of those
+    /// arguments may change.
+    ///
+    /// The function is called once for each new package and then cached until we detect a
+    /// (potential) change to `range`, otherwise it is cached, assuming that the priority only
+    /// depends on the arguments to this function.
+    ///
+    /// If two packages have the same priority, PubGrub will bias toward a breadth first search.
+    fn prioritize(
+        &self,
+        package: &Self::P,
+        range: &Self::VS,
+        // TODO(konsti): Are we always refreshing the priorities when `PackageResolutionStatistics`
+        // changed for a package?
+        package_conflicts_counts: &PackageResolutionStatistics,
+    ) -> Self::Priority;
 
     /// Once the resolver has found the highest `Priority` package from all potential valid
     /// packages, it needs to know what version of that package to use. The most common pattern
