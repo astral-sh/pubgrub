@@ -26,8 +26,7 @@ pub trait Reporter<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> 
     ) -> Self::Output;
 }
 
-/// Derivation tree resulting in the impossibility
-/// to solve the dependencies of our root package.
+/// Derivation tree resulting in the impossibility to solve the dependencies of our root package.
 #[derive(Debug, Clone)]
 pub enum DerivationTree<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// External incompatibility.
@@ -36,8 +35,7 @@ pub enum DerivationTree<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Disp
     Derived(Derived<P, VS, M>),
 }
 
-/// Incompatibilities that are not derived from others,
-/// they have their own reason.
+/// Incompatibility that is not derived from other incompatibilities.
 #[derive(Debug, Clone)]
 pub enum External<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
@@ -55,11 +53,10 @@ pub enum External<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
 pub struct Derived<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Terms of the incompatibility.
     pub terms: Map<P, Term<VS>>,
-    /// Indicate if that incompatibility is present multiple times
-    /// in the derivation tree.
-    /// If that is the case, it has a unique id, provided in that option.
-    /// Then, we may want to only explain it once,
-    /// and refer to the explanation for the other times.
+    /// Indicate if the incompatibility is present multiple times in the derivation tree.
+    ///
+    /// If that is the case, the number is a unique id. This can be used to only explain this
+    /// incompatibility once, then refer to the explanation for the other times.
     pub shared_id: Option<usize>,
     /// First cause.
     pub cause1: Arc<DerivationTree<P, VS, M>>,

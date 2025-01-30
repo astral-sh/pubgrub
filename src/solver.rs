@@ -279,6 +279,13 @@ pub trait DependencyProvider {
     /// A common choice is [`Ranges`][version_ranges::Ranges].
     type VS: VersionSet<V = Self::V>;
 
+    /// The type returned from `prioritize`. The resolver does not care what type this is
+    /// as long as it can pick a largest one and clone it.
+    ///
+    /// [`Reverse`](std::cmp::Reverse) can be useful if you want to pick the package with
+    /// the fewest versions that match the outstanding constraint.
+    type Priority: Ord + Clone;
+
     /// Type for custom incompatibilities.
     ///
     /// There are reasons in user code outside pubgrub that can cause packages or versions
@@ -290,13 +297,6 @@ pub trait DependencyProvider {
     /// The intended use is to track them in an enum and assign them to this type. You can also
     /// assign [`String`] as placeholder.
     type M: Eq + Clone + Debug + Display;
-
-    /// The type returned from `prioritize`. The resolver does not care what type this is
-    /// as long as it can pick a largest one and clone it.
-    ///
-    /// [`Reverse`](std::cmp::Reverse) can be useful if you want to pick the package with
-    /// the fewest versions that match the outstanding constraint.
-    type Priority: Ord + Clone;
 
     /// The kind of error returned from these methods.
     ///
