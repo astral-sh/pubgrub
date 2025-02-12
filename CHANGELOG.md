@@ -2,21 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.3.0] UNRELEASED [(diff with 0.2.1)][unreleased-diff]
+## [0.3.0] - 2025-02-12 - [(diff with 0.2.1)][0.2.1-diff]
 
-PubGrub 0.3 improves the interfaces and speeds resolution significantly.
+PubGrub 0.3 improves the interface and speeds resolution significantly. The API changed significantly, as the internal
+changes are almost a rewrite. We recommend starting the migration by implementing the new `DependencyProvider`
+interface following the [Guide](https://pubgrub-rs.github.io/pubgrub/pubgrub/).
 
-All public interfaces are now in the root of the crate. 
+All public interfaces are now in the root of the crate.
 
-In the main interface, [`DependencyProvider`](TODO), `choose_package_version` was split into two methods: `prioritize`
+In the main interface, `DependencyProvider`, `choose_package_version` was split into two methods: `prioritize`
 for choosing which package to decide next by assigning a priority to each package, and `choose_version`. The generic
 parameters became associated types. The version set is configurable by an associated type.
 
-[`Dependencies`](TODO) gained a generic parameter for custom incompatibility type outside version conflicts, such as
-packages not available for the current platform or permission errors. This type is on `DependencyProvider` as
+`Dependencies` gained a generic parameter for custom incompatibility type outside version conflicts, such as packages
+not available for the current platform or permission errors. This type is on `DependencyProvider` as
 `DependencyProvider::M`.
 
-`pubgrub::range::Range` now lives in its own crate as [`version_ranges::Ranges`](https://docs.rs/version-ranges/0.1/version_ranges/struct.Ranges.html).
+`pubgrub::range::Range` now lives in its own crate as [`version_ranges::Ranges`](https://docs.rs/version-ranges/0.1/version_ranges/struct.Ranges.html). A `Version` can be almost any
+ordered type now, it only needs to support set operations through `VersionSet`. 
 
 At a glance, this is the new `DependencyProvider` interface:
 
@@ -208,6 +211,7 @@ The gist of it is:
 - `.gitignore` configured for a Rust project.
 - `.github/workflows/` CI to automatically build, test and document on push and pull requests.
 
+[0.3.0]: https://github.com/pubgrub-rs/pubgrub/releases/tag/v0.3.0
 [0.2.1]: https://github.com/pubgrub-rs/pubgrub/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pubgrub-rs/pubgrub/releases/tag/v0.2.0
 [0.1.0]: https://github.com/pubgrub-rs/pubgrub/releases/tag/v0.1.0
