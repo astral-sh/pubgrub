@@ -4,9 +4,9 @@ All notable changes to this project will be documented in this file.
 
 ## [0.3.0] - 2025-02-12 - [(diff with 0.2.1)][0.2.1-diff]
 
-PubGrub 0.3 improves the interface and speeds resolution significantly. The API changed significantly, as the internal
-changes are almost a rewrite. We recommend starting the migration by implementing the new `DependencyProvider`
-interface following the [Guide](https://pubgrub-rs.github.io/pubgrub/pubgrub/).
+PubGrub 0.3 has a more flexible interface and speeds resolution significantly. The public API is very different now, we
+recommend starting the migration by implementing the new `DependencyProvider` interface following the
+[Guide](https://pubgrub-rs.github.io/pubgrub/pubgrub/).
 
 All public interfaces are now in the root of the crate.
 
@@ -217,5 +217,6 @@ The gist of it is:
 [0.1.0]: https://github.com/pubgrub-rs/pubgrub/releases/tag/v0.1.0
 
 [unreleased-diff]: https://github.com/pubgrub-rs/pubgrub/compare/release...dev
+[0.2.1-diff]: https://github.com/pubgrub-rs/pubgrub/compare/v0.2.1...v0.3.0
 [0.2.0-diff]: https://github.com/pubgrub-rs/pubgrub/compare/v0.2.0...v0.2.1
 [0.1.0-diff]: https://github.com/pubgrub-rs/pubgrub/compare/v0.1.0...v0.2.0
