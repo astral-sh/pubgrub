@@ -182,6 +182,14 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
             return None;
         }
         let (p1, p2) = self_pkgs;
+        // We ignore self-dependencies. They are always either trivially true or trivially false,
+        // as the package version implies whether the constraint will always be fulfilled or always
+        // violated.
+        // At time of writing, the public crate API only allowed a map of dependencies,
+        // meaning it can't hit this branch, which requires two self-dependencies.
+        if p1 == p2 {
+            return None;
+        }
         let dep_term = self.get(p2);
         // The dependency range for p2 must be the same in both case
         // to be able to merge multiple p1 ranges.
@@ -384,10 +392,12 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
 #[cfg(test)]
 pub(crate) mod tests {
     use proptest::prelude::*;
+    use std::cmp::Reverse;
+    use std::collections::BTreeMap;
 
     use super::*;
     use crate::term::tests::strategy as term_strat;
-    use crate::Ranges;
+    use crate::{OfflineDependencyProvider, Ranges, State};
 
     proptest! {
 
@@ -423,5 +433,67 @@ pub(crate) mod tests {
             assert_eq!(i_resolution.package_terms.iter().map(|(&k, v)|(k, v.clone())).collect::<Map<_, _>>(), i3);
         }
 
+    }
+
+    /// Check that multiple self-dependencies are supported.
+    ///
+    /// The current public API deduplicates dependencies through a map, so we test them here
+    /// manually.
+    ///
+    /// https://github.com/astral-sh/uv/issues/13344
+    #[test]
+    fn package_depend_on_self() {
+        let cases: &[Vec<(String, Ranges<usize>)>] = &[
+            vec![("foo".to_string(), Ranges::full())],
+            vec![
+                ("foo".to_string(), Ranges::full()),
+                ("foo".to_string(), Ranges::full()),
+            ],
+            vec![
+                ("foo".to_string(), Ranges::full()),
+                ("foo".to_string(), Ranges::singleton(1usize)),
+            ],
+            vec![
+                ("foo".to_string(), Ranges::singleton(1usize)),
+                ("foo".to_string(), Ranges::from_range_bounds(1usize..2)),
+                ("foo".to_string(), Ranges::from_range_bounds(1usize..3)),
+            ],
+        ];
+
+        for case in cases {
+            let mut state: State<OfflineDependencyProvider<String, Ranges<usize>>> =
+                State::init("root".to_string(), 0);
+            state.unit_propagation(state.root_package).unwrap();
+
+            // Add the root package
+            state.add_package_version_dependencies(
+                state.root_package,
+                0,
+                [("foo".to_string(), Ranges::singleton(1usize))],
+            );
+            state.unit_propagation(state.root_package).unwrap();
+
+            // Add a package that depends on itself twice
+            let (next, _) = state
+                .partial_solution
+                .pick_highest_priority_pkg(|_p, _r| (0, Reverse(0)))
+                .unwrap();
+            state.add_package_version_dependencies(next, 1, case.clone());
+            state.unit_propagation(next).unwrap();
+
+            assert!(state
+                .partial_solution
+                .pick_highest_priority_pkg(|_p, _r| (0, Reverse(0)))
+                .is_none());
+
+            let solution: BTreeMap<String, usize> = state
+                .partial_solution
+                .extract_solution()
+                .map(|(p, v)| (state.package_store[p].clone(), v))
+                .collect();
+            let expected = BTreeMap::from([("root".to_string(), 0), ("foo".to_string(), 1)]);
+
+            assert_eq!(solution, expected, "{:?}", case);
+        }
     }
 }
