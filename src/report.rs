@@ -179,10 +179,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Display for Ex
             }
             Self::Custom(package, set, metadata) => {
                 if set == &VS::full() {
-                    write!(
-                        f,
-                        "dependencies of {package} are unavailable {metadata}"
-                    )
+                    write!(f, "dependencies of {package} are unavailable {metadata}")
                 } else {
                     write!(
                         f,
