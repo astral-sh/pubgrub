@@ -96,6 +96,40 @@ impl<DP: DependencyProvider> State<DP> {
         self.merge_incompatibility(id);
     }
 
+    /// Add a single custom incompatibility that requires that the base package and the proxy
+    /// package share the same version range.
+    ///
+    /// This intended for cases where proxy packages (also known as virtual packages) are used.
+    /// Without this information, pubgrub does not know that these packages have to be at the same
+    /// version. In cases where the base package is already set to an incompatible version, this
+    /// avoids going through all versions of the proxy package. In cases where there are two
+    /// incompatible proxy packages, it avoids trying versions for both of them. This improves both
+    /// performance (we don't need to check all versions when there is a conflict) and error
+    /// messages (report a conflict of version ranges instead of enumerating the conflicting
+    /// versions).
+    ///
+    /// Using this method requires that each version of the proxy package depends on the exact
+    /// same version of the base package.
+    #[allow(unused)]
+    pub(crate) fn add_proxy_package_incompatibility(
+        &mut self,
+        proxy_package: Id<DP::P>,
+        base_package: Id<DP::P>,
+        versions: DP::VS,
+    ) {
+        let incompat = Incompatibility::from_dependency(
+            proxy_package,
+            versions.clone(),
+            (base_package, versions),
+        );
+        let id = self
+            .incompatibility_store
+            .alloc_iter([incompat].into_iter());
+        for id in IncompDpId::<DP>::range_to_iter(id) {
+            self.merge_incompatibility(id);
+        }
+    }
+
     /// Add an incompatibility to the state.
     #[cold]
     pub(crate) fn add_incompatibility_from_dependencies(
