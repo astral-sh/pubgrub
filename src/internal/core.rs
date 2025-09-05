@@ -109,7 +109,8 @@ impl<DP: DependencyProvider> State<DP> {
     ///
     /// Using this method requires that each version of the proxy package depends on the exact
     /// version of the base package.
-    pub fn add_proxy_package(
+    #[allow(unused)]
+    pub(crate) fn add_proxy_package(
         &mut self,
         proxy_package: Id<DP::P>,
         base_package: Id<DP::P>,
