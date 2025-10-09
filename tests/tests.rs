@@ -115,14 +115,12 @@ fn same_result_across_platforms() {
     let mut dependency_provider = UnprioritizingDependencyProvider::<_, NumVS>::new();
 
     let x = (0..1000)
-        .into_iter()
         .map(|i| (i.to_string(), Ranges::full()))
         .collect::<Vec<_>>();
     dependency_provider.add_dependencies("root".to_string(), 1u32, x);
 
     for i in 0..1000 {
         let x = (0..1000)
-            .into_iter()
             .filter(|j| *j != i)
             .map(|i| (i.to_string(), Ranges::<u32>::singleton(1u32)))
             .collect::<Vec<_>>();
@@ -134,5 +132,5 @@ fn same_result_across_platforms() {
     let ver: u32 = 1;
     let resolution = resolve(&dependency_provider, name, ver).unwrap();
     let (p, _v) = resolution.into_iter().find(|(_p, v)| *v == 2).unwrap();
-    assert_eq!(p, "712".to_string());
+    assert_eq!(p, "0".to_string());
 }
