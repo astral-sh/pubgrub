@@ -279,7 +279,7 @@ pub fn resolve<DP: DependencyProvider>(
 /// The dependencies of a package with their version ranges.
 ///
 /// There is a difference in semantics between an empty [DependencyConstraints] and
-/// [Dependencies::Unavailable](Dependencies::Unavailable):
+/// [Dependencies::Unavailable]:
 /// The former means the package has no dependency and it is a known fact,
 /// while the latter means they could not be fetched by the [DependencyProvider].
 #[derive(Debug, Clone, PartialEq, Eq)]
