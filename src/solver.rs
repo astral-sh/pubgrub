@@ -4,10 +4,9 @@ use std::collections::BTreeSet as Set;
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use log::{debug, info};
-
 use crate::internal::{Id, Incompatibility, State};
 use crate::{Map, Package, PubGrubError, Term, VersionSet};
+use log::{debug, info};
 
 /// Statistics on how often a package conflicted with other packages.
 #[derive(Debug, Default, Clone)]
@@ -285,6 +284,32 @@ pub fn resolve<DP: DependencyProvider>(
 /// while the latter means they could not be fetched by the [DependencyProvider].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DependencyConstraints<P, VS>(Vec<(P, VS)>);
+
+/// Backwards compatibility: Serialize as map.
+#[cfg(feature = "serde")]
+impl<P: Package + serde::Serialize, VS: serde::Serialize> serde::Serialize
+    for DependencyConstraints<P, VS>
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        Map::from_iter(self.0.iter().map(|(p, v)| (p, v))).serialize(serializer)
+    }
+}
+
+/// Backwards compatibility: Deserialize as map.
+#[cfg(feature = "serde")]
+impl<'de, P: Package + serde::Deserialize<'de>, VS: serde::Deserialize<'de>> serde::Deserialize<'de>
+    for DependencyConstraints<P, VS>
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Ok(Self::from_iter(Map::deserialize(deserializer)?))
+    }
+}
 
 impl<P, VS> DependencyConstraints<P, VS> {
     /// Iterate over each dependency in order.
