@@ -7,9 +7,7 @@ use std::fmt::{Debug, Display};
 use log::{debug, info};
 
 use crate::internal::{Id, Incompatibility, State};
-use crate::{
-    DependencyConstraints, Map, Package, PubGrubError, SelectedDependencies, Term, VersionSet,
-};
+use crate::{Map, Package, PubGrubError, SelectedDependencies, Term, VersionSet};
 
 /// Statistics on how often a package conflicted with other packages.
 #[derive(Debug, Default, Clone)]
@@ -244,6 +242,43 @@ pub fn resolve<DP: DependencyProvider>(
             );
             state.partial_solution.add_decision(next, v);
         }
+    }
+}
+
+/// The dependencies of a package with their version ranges.
+///
+/// There is a difference in semantics between an empty [DependencyConstraints] and
+/// [Dependencies::Unavailable](Dependencies::Unavailable):
+/// The former means the package has no dependency and it is a known fact,
+/// while the latter means they could not be fetched by the [DependencyProvider].
+#[derive(Debug, Clone)]
+pub struct DependencyConstraints<P, VS>(Vec<(P, VS)>);
+
+impl<P, VS> DependencyConstraints<P, VS> {
+    /// Iterate over each dependency in order.
+    pub fn iter(&self) -> impl Iterator<Item = &(P, VS)> {
+        self.0.iter()
+    }
+}
+
+impl<P, VS> Default for DependencyConstraints<P, VS> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+impl<P, VS> FromIterator<(P, VS)> for DependencyConstraints<P, VS> {
+    fn from_iter<T: IntoIterator<Item = (P, VS)>>(iter: T) -> Self {
+        Self(iter.into_iter().collect())
+    }
+}
+
+impl<P, VS> IntoIterator for DependencyConstraints<P, VS> {
+    type Item = (P, VS);
+    type IntoIter = <Vec<(P, VS)> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
 
