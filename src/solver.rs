@@ -7,7 +7,7 @@ use std::fmt::{Debug, Display};
 use log::{debug, info};
 
 use crate::internal::{Id, Incompatibility, State};
-use crate::{Map, Package, PubGrubError, SelectedDependencies, Term, VersionSet};
+use crate::{Map, Package, PubGrubError, Term, VersionSet};
 
 /// Statistics on how often a package conflicted with other packages.
 #[derive(Debug, Default, Clone)]
@@ -46,6 +46,36 @@ impl PackageResolutionStatistics {
     }
 }
 
+/// The resolved dependencies and their versions.
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct SelectedDependencies<P: Package, V>(Map<P, V>);
+
+impl<P: Package, V> SelectedDependencies<P, V> {
+    /// Iterate over the resolved dependencies and their versions.
+    pub fn iter(&self) -> impl Iterator<Item = (&P, &V)> {
+        self.0.iter()
+    }
+
+    /// Get the version of a specific dependencies.
+    pub fn get(&self, package: &P) -> Option<&V> {
+        self.0.get(package)
+    }
+}
+
+impl<P: Package, V> FromIterator<(P, V)> for SelectedDependencies<P, V> {
+    fn from_iter<I: IntoIterator<Item = (P, V)>>(iter: I) -> Self {
+        Self(Map::from_iter(iter))
+    }
+}
+
+impl<P: Package, V> IntoIterator for SelectedDependencies<P, V> {
+    type Item = (P, V);
+    type IntoIter = <Map<P, V> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
 /// Finds a set of packages satisfying dependency bounds for a given package + version pair.
 ///
 /// It consists in efficiently finding a set of packages and versions
@@ -107,7 +137,7 @@ pub fn resolve<DP: DependencyProvider>(
     dependency_provider: &DP,
     package: DP::P,
     version: impl Into<DP::V>,
-) -> Result<SelectedDependencies<DP>, PubGrubError<DP>> {
+) -> Result<SelectedDependencies<DP::P, DP::V>, PubGrubError<DP>> {
     let mut state: State<DP> = State::init(package.clone(), version.into());
     let mut conflict_tracker: Map<Id<DP::P>, PackageResolutionStatistics> = Map::default();
     let mut added_dependencies: Map<Id<DP::P>, Set<DP::V>> = Map::default();
@@ -152,11 +182,13 @@ pub fn resolve<DP: DependencyProvider>(
                 )
             })
         else {
-            return Ok(state
-                .partial_solution
-                .extract_solution()
-                .map(|(p, v)| (state.package_store[p].clone(), v))
-                .collect());
+            return Ok(SelectedDependencies(
+                state
+                    .partial_solution
+                    .extract_solution()
+                    .map(|(p, v)| (state.package_store[p].clone(), v))
+                    .collect(),
+            ));
         };
         next = highest_priority_pkg;
 
@@ -251,7 +283,7 @@ pub fn resolve<DP: DependencyProvider>(
 /// [Dependencies::Unavailable](Dependencies::Unavailable):
 /// The former means the package has no dependency and it is a known fact,
 /// while the latter means they could not be fetched by the [DependencyProvider].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DependencyConstraints<P, VS>(Vec<(P, VS)>);
 
 impl<P, VS> DependencyConstraints<P, VS> {

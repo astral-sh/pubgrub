@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 unstable resolutions across platform (https://github.com/pubgrub-rs/pubgrub/issues/373). `DependencyConstraints` can be
 constructed from an iterator. It is currently backed by a `Vec` internally.
 
+`SelectedDependencies` is now an opaque type that support iteration and `get()`.
+
 ## [0.3.0] - 2025-02-12 - [(diff with 0.2.1)][0.2.1-diff]
 
 PubGrub 0.3 has a more flexible interface and speeds resolution significantly. The public API is very different now, we

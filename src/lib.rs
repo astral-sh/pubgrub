@@ -230,10 +230,11 @@ pub use report::{
     ReportFormatter, Reporter,
 };
 pub use solver::{
-    Dependencies, DependencyConstraints, DependencyProvider, PackageResolutionStatistics, resolve,
+    Dependencies, DependencyConstraints, DependencyProvider, PackageResolutionStatistics,
+    SelectedDependencies, resolve,
 };
 pub use term::Term;
-pub use type_aliases::{Map, SelectedDependencies, Set};
+pub use type_aliases::{Map, Set};
 pub use version::{SemanticVersion, VersionParseError};
 pub use version_ranges::Ranges;
 #[deprecated(note = "Use `Ranges` instead")]
