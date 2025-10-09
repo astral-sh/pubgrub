@@ -2,7 +2,7 @@
 
 use pubgrub::{
     DefaultStringReporter, Map, OfflineDependencyProvider, PubGrubError, Ranges, Reporter as _,
-    SemanticVersion, Set, resolve,
+    SelectedDependencies, SemanticVersion, Set, resolve,
 };
 
 type NumVS = Ranges<u32>;
@@ -48,7 +48,10 @@ fn no_conflict() {
     expected_solution.insert("bar", (1, 0, 0).into());
 
     // Comparing the true solution with the one computed by the algorithm.
-    assert_eq!(expected_solution, computed_solution);
+    assert_eq!(
+        SelectedDependencies::from_iter(expected_solution),
+        computed_solution
+    );
 }
 
 #[test]
@@ -84,7 +87,10 @@ fn avoiding_conflict_during_decision_making() {
     expected_solution.insert("bar", (1, 1, 0).into());
 
     // Comparing the true solution with the one computed by the algorithm.
-    assert_eq!(expected_solution, computed_solution);
+    assert_eq!(
+        SelectedDependencies::from_iter(expected_solution),
+        computed_solution
+    );
 }
 
 #[test]
@@ -118,7 +124,10 @@ fn conflict_resolution() {
     expected_solution.insert("foo", (1, 0, 0).into());
 
     // Comparing the true solution with the one computed by the algorithm.
-    assert_eq!(expected_solution, computed_solution);
+    assert_eq!(
+        SelectedDependencies::from_iter(expected_solution),
+        computed_solution
+    );
 }
 
 #[test]
@@ -177,7 +186,10 @@ fn conflict_with_partial_satisfier() {
     expected_solution.insert("target", (2, 0, 0).into());
 
     // Comparing the true solution with the one computed by the algorithm.
-    assert_eq!(expected_solution, computed_solution);
+    assert_eq!(
+        SelectedDependencies::from_iter(expected_solution),
+        computed_solution
+    );
 }
 
 #[test]
@@ -208,7 +220,10 @@ fn double_choices() {
 
     // Run the algorithm.
     let computed_solution = resolve(&dependency_provider, "a", 0u32).unwrap();
-    assert_eq!(expected_solution, computed_solution);
+    assert_eq!(
+        SelectedDependencies::from_iter(expected_solution),
+        computed_solution
+    );
 }
 
 #[test]

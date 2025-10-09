@@ -117,7 +117,7 @@ impl<P: Package, VS: VersionSet> SatResolve<P, VS> {
 
     pub fn is_valid_solution<DP: DependencyProvider<P = P, VS = VS, V = VS::V>>(
         &mut self,
-        pids: &SelectedDependencies<DP>,
+        pids: &SelectedDependencies<DP::P, DP::V>,
     ) -> bool {
         let mut assumption = vec![];
 
@@ -137,7 +137,7 @@ impl<P: Package, VS: VersionSet> SatResolve<P, VS> {
 
     pub fn check_resolve<DP: DependencyProvider<P = P, VS = VS, V = VS::V>>(
         &mut self,
-        res: &Result<SelectedDependencies<DP>, PubGrubError<DP>>,
+        res: &Result<SelectedDependencies<DP::P, DP::V>, PubGrubError<DP>>,
         p: &P,
         v: &VS::V,
     ) {

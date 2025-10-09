@@ -130,10 +130,7 @@ fn timeout_resolve<DP: DependencyProvider>(
     dependency_provider: DP,
     name: DP::P,
     version: impl Into<DP::V>,
-) -> Result<
-    SelectedDependencies<TimeoutDependencyProvider<DP>>,
-    PubGrubError<TimeoutDependencyProvider<DP>>,
-> {
+) -> Result<SelectedDependencies<DP::P, DP::V>, PubGrubError<TimeoutDependencyProvider<DP>>> {
     resolve(
         &TimeoutDependencyProvider::new(dependency_provider, 50_000),
         name,
@@ -292,7 +289,7 @@ fn meta_test_deep_trees_from_strategy() {
             let res = resolve(&dependency_provider, name, ver);
             dis[res
                 .as_ref()
-                .map(|x| std::cmp::min(x.len(), dis.len()) - 1)
+                .map(|x| std::cmp::min(x.iter().count(), dis.len()) - 1)
                 .unwrap_or(0)] += 1;
             if dis.iter().all(|&x| x > 0) {
                 return;
