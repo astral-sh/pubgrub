@@ -19,6 +19,16 @@ jobs:
       - run: cargo build --workspace
       - run: cargo test --all-features --workspace
 
+  test-i686:
+    name: Tests (32-bit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup target add i686-unknown-linux-gnu
+      - run: cargo build --workspace --target i686-unknown-linux-gnu
+      - run: cargo test --all-features --workspace --target i686-unknown-linux-gnu
+
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
