@@ -553,7 +553,7 @@ proptest! {
             .packages()
             .flat_map(|p| {
                 dependency_provider
-                    .versions(&p)
+                    .versions(p)
                     .unwrap()
                     .map(move |&v| (*p, v))
             })

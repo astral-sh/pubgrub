@@ -2,8 +2,9 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub enum SmallVec<T> {
+    #[default]
     Empty,
     One([T; 1]),
     Two([T; 2]),
@@ -77,12 +78,6 @@ impl<T> SmallVec<T> {
 
     pub fn iter(&self) -> std::slice::Iter<'_, T> {
         self.as_slice().iter()
-    }
-}
-
-impl<T> Default for SmallVec<T> {
-    fn default() -> Self {
-        Self::Empty
     }
 }
 

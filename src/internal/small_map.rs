@@ -2,8 +2,9 @@ use std::hash::Hash;
 
 use crate::Map;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) enum SmallMap<K, V> {
+    #[default]
     Empty,
     One([(K, V); 1]),
     Two([(K, V); 2]),
@@ -170,12 +171,6 @@ impl<K: Clone + PartialEq + Eq + Hash, V: Clone> SmallMap<K, V> {
                 },
             }
         }
-    }
-}
-
-impl<K, V> Default for SmallMap<K, V> {
-    fn default() -> Self {
-        Self::Empty
     }
 }
 
