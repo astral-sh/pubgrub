@@ -3,8 +3,10 @@ on:
   pull_request:
   merge_group:
   push:
-    branches: [ release, dev ]
-  schedule: [ cron: "0 6 * * 4" ]
+    branches: [release, dev]
+  schedule: [cron: "0 6 * * 4"]
+
+permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,8 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
-      - uses: dtolnay/rust-toolchain@stable
+        with:
+          persist-credentials: false
+
       - run: cargo build --workspace
+
       - run: cargo test --all-features --workspace
 
   clippy:
@@ -24,9 +29,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
-      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          persist-credentials: false
+
       - name: Check Clippy lints
         env:
           RUSTFLAGS: -D warnings
@@ -37,9 +42,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
-      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          persist-credentials: false
+
       - run: cargo fmt --all -- --check
 
   check_documentation:
@@ -47,7 +52,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
-      - uses: dtolnay/rust-toolchain@stable
+        with:
+          persist-credentials: false
+
       - name: Check documentation
         env:
           RUSTDOCFLAGS: -D warnings
@@ -58,7 +65,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
-      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          persist-credentials: false
+
+      - run: rustup toolchain install nightly
+
       - run: cargo +nightly update -Zminimal-versions
+
       - run: cargo +nightly build --workspace
+
       - run: cargo +nightly test --all-features --workspace
