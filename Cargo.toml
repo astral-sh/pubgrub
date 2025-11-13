@@ -22,6 +22,9 @@ include = ["Cargo.toml", "LICENSE", "README.md", "src/**", "tests/**", "examples
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+name = "pubgrub"
+
 [dependencies]
 indexmap = "2.7.0"
 # for debug logs in tests
