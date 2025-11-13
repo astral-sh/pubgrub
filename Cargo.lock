@@ -83,6 +83,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "astral-pubgrub"
+version = "0.4.0"
+dependencies = [
+ "codspeed-criterion-compat",
+ "env_logger",
+ "indexmap",
+ "log",
+ "priority-queue",
+ "proptest",
+ "ron",
+ "rustc-hash 2.1.2",
+ "serde",
+ "thiserror 2.0.18",
+ "varisat",
+ "version-ranges",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -206,9 +224,9 @@ checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 
 [[package]]
 name = "codspeed"
-version = "4.7.0"
+version = "4.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57af92d1db7f6871b7e82c79cd87f2501db66f36b0eab924be6ea83dd6b2f3f3"
+checksum = "b684e94583e85a5ca7e1a6454a89d76a5121240f2fb67eb564129d9bafdb9db0"
 dependencies = [
  "anyhow",
  "cc",
@@ -224,9 +242,9 @@ dependencies = [
 
 [[package]]
 name = "codspeed-criterion-compat"
-version = "4.7.0"
+version = "4.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d31ae2e9ab23c29fa13bdfa06d012524176f5c0f4e25ec262cd829d947ebc5e"
+checksum = "2e65444156eb73ad7f57618188f8d4a281726d133ef55b96d1dcff89528609ab"
 dependencies = [
  "clap",
  "codspeed",
@@ -237,9 +255,9 @@ dependencies = [
 
 [[package]]
 name = "codspeed-criterion-compat-walltime"
-version = "4.7.0"
+version = "4.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc8605e40bab5114dcb0f76268e18880082b5798dec10757b5b58d2c3bbc7a1c"
+checksum = "96389aaa4bbb872ea4924dc0335b2bb181bcf28d6eedbe8fea29afcc5bde36a6"
 dependencies = [
  "anes",
  "cast",
@@ -672,25 +690,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pubgrub"
-version = "0.4.0"
-dependencies = [
- "cc",
- "codspeed-criterion-compat",
- "env_logger",
- "indexmap",
- "log",
- "priority-queue",
- "proptest",
- "ron",
- "rustc-hash 2.1.2",
- "serde",
- "thiserror 2.0.18",
- "varisat",
- "version-ranges",
-]
-
-[[package]]
 name = "quick-error"
 version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -872,9 +871,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.28"
+version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a7852d02fc848982e0c167ef163aaff9cd91dc640ba85e263cb1ce46fae51cd"
+checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 
 [[package]]
 name = "serde"
@@ -1160,7 +1159,7 @@ checksum = "68ed610a8d5e63d9c0e31300e8fdb55104c5f21e422743a9dc74848fa8317fd2"
 
 [[package]]
 name = "version-ranges"
-version = "0.1.3"
+version = "0.1.2"
 dependencies = [
  "proptest",
  "ron",
