@@ -83,6 +83,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "astral-pubgrub"
+version = "0.3.0"
+dependencies = [
+ "codspeed-criterion-compat",
+ "env_logger",
+ "indexmap",
+ "log",
+ "priority-queue",
+ "proptest",
+ "ron",
+ "rustc-hash 2.1.1",
+ "serde",
+ "thiserror 2.0.17",
+ "varisat",
+ "version-ranges",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -670,24 +688,6 @@ dependencies = [
  "rusty-fork",
  "tempfile",
  "unarray",
-]
-
-[[package]]
-name = "pubgrub"
-version = "0.3.0"
-dependencies = [
- "codspeed-criterion-compat",
- "env_logger",
- "indexmap",
- "log",
- "priority-queue",
- "proptest",
- "ron",
- "rustc-hash 2.1.1",
- "serde",
- "thiserror 2.0.17",
- "varisat",
- "version-ranges",
 ]
 
 [[package]]
