@@ -1143,7 +1143,7 @@ checksum = "68ed610a8d5e63d9c0e31300e8fdb55104c5f21e422743a9dc74848fa8317fd2"
 
 [[package]]
 name = "version-ranges"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "proptest",
  "ron",
