@@ -617,7 +617,7 @@ fn large_case() {
         } else if name.ends_with("str_SemanticVersion.ron") {
             let dependency_provider: OfflineDependencyProvider<
                 &str,
-                Ranges<pubgrub::SemanticVersion>,
+                Ranges<astral_pubgrub::SemanticVersion>,
             > = ron::de::from_str(&data).unwrap();
             let mut sat = SatResolve::new(&dependency_provider);
             for p in dependency_provider.packages() {
