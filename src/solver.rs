@@ -84,7 +84,7 @@ impl PackageResolutionStatistics {
 ///
 /// ```
 /// # use std::convert::Infallible;
-/// # use pubgrub::{resolve, OfflineDependencyProvider, PubGrubError, Ranges};
+/// # use astral_pubgrub::{resolve, OfflineDependencyProvider, PubGrubError, Ranges};
 /// #
 /// # type NumVS = Ranges<u32>;
 /// #

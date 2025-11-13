@@ -11,7 +11,7 @@ use proptest::prelude::*;
 use proptest::sample::Index;
 use proptest::string::string_regex;
 
-use pubgrub::{
+use astral_pubgrub::{
     DefaultStringReporter, Dependencies, DependencyProvider, DerivationTree, External,
     OfflineDependencyProvider, Package, PackageResolutionStatistics, PubGrubError, Ranges,
     Reporter, SelectedDependencies, VersionSet, resolve,

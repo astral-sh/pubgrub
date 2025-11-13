@@ -4,8 +4,8 @@
 //!
 //! Dependencies are constructed in a way that all versions need to be tested before finding a solution.
 
+use astral_pubgrub::OfflineDependencyProvider;
 use criterion::*;
-use pubgrub::OfflineDependencyProvider;
 use version_ranges::Ranges;
 
 /// This benchmark is a simplified reproduction of one of the patterns found in the `solana-*` crates from Cargo:

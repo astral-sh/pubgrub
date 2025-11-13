@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use pubgrub::{OfflineDependencyProvider, PubGrubError, Ranges, resolve};
+use astral_pubgrub::{OfflineDependencyProvider, PubGrubError, Ranges, resolve};
 
 type NumVS = Ranges<u32>;
 
