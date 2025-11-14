@@ -84,7 +84,7 @@ dependencies = [
 
 [[package]]
 name = "astral-pubgrub"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "astral-version-ranges",
  "codspeed-criterion-compat",
