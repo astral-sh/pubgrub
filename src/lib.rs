@@ -229,9 +229,12 @@ pub use report::{
     DefaultStringReportFormatter, DefaultStringReporter, DerivationTree, Derived, External,
     ReportFormatter, Reporter,
 };
-pub use solver::{Dependencies, DependencyProvider, PackageResolutionStatistics, resolve};
+pub use solver::{
+    Dependencies, DependencyConstraints, DependencyProvider, PackageResolutionStatistics,
+    SelectedDependencies, resolve,
+};
 pub use term::Term;
-pub use type_aliases::{DependencyConstraints, Map, SelectedDependencies, Set};
+pub use type_aliases::{Map, Set};
 pub use version::{SemanticVersion, VersionParseError};
 pub use version_ranges::Ranges;
 #[deprecated(note = "Use `Ranges` instead")]
