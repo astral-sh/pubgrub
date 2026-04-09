@@ -87,3 +87,16 @@ jobs:
       - run: cargo +nightly build --workspace
 
       - run: cargo +nightly test --all-features --workspace
+
+  minimal-rust-version:
+    name: Minimum Rust version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      # NOTE: Keep in sync with `Cargo.toml`
+      - run: rustup toolchain install 1.92
+
+      - run: cargo +1.92 test --all-features --workspace
