@@ -2,13 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
-## 0.4.0
+## 0.4.0 - 2026-04-09
 
-`DependencyConstraints` is now an opaque type that retains the ordering of the dependencies across platforms. This fixes
-unstable resolutions across platform (https://github.com/pubgrub-rs/pubgrub/issues/373). `DependencyConstraints` can be
-constructed from an iterator. It is currently backed by a `Vec` internally.
+### Breaking
 
-`SelectedDependencies` is now an opaque type that support iteration and `get()`.
+- `DependencyConstraints` is now an opaque type that retains the ordering of the dependencies across platforms. This
+  fixes unstable resolutions across platform (https://github.com/pubgrub-rs/pubgrub/issues/373). `DependencyConstraints`
+  can be constructed from an iterator. It is currently backed by a `Vec` internally.
+- Following the above, `SelectedDependencies` is now an opaque type that support iteration and `get()`.
+
+
+### Added
+
+- Add method for incompatibilities between virtual and base packages ([#352](https://github.com/pubgrub-rs/pubgrub/pull/352))
+
+### Changed
+
+- Print version set on panic ([#337](https://github.com/pubgrub-rs/pubgrub/pull/337))
+- Declare a minimum supported Rust version of 1.92 ([#197](https://github.com/pubgrub-rs/pubgrub/issues/197))
+- Update to the 2024 edition ([#348](https://github.com/pubgrub-rs/pubgrub/pull/348))
+
+### Fixed
+
+- Allow multiple self-dependencies ([#338](https://github.com/pubgrub-rs/pubgrub/pull/338))
 
 ## [0.3.0] - 2025-02-12 - [(diff with 0.2.1)][0.2.1-diff]
 
@@ -26,8 +42,8 @@ parameters became associated types. The version set is configurable by an associ
 not available for the current platform or permission errors. This type is on `DependencyProvider` as
 `DependencyProvider::M`.
 
-`pubgrub::range::Range` now lives in its own crate as [`version_ranges::Ranges`](https://docs.rs/version-ranges/0.1/version_ranges/struct.Ranges.html). A `Version` can be almost any
-ordered type now, it only needs to support set operations through `VersionSet`. 
+`pubgrub::range::Range` now lives in its own crate as [`version_ranges::Ranges`](https://docs.rs/version-ranges/0.1/version_ranges/struct.Ranges.html).
+A `Version` can be almost any ordered type now, it only needs to support set operations through `VersionSet`.
 
 At a glance, this is the new `DependencyProvider` interface:
 
@@ -223,7 +239,6 @@ The gist of it is:
 [0.2.1]: https://github.com/pubgrub-rs/pubgrub/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pubgrub-rs/pubgrub/releases/tag/v0.2.0
 [0.1.0]: https://github.com/pubgrub-rs/pubgrub/releases/tag/v0.1.0
-
 [unreleased-diff]: https://github.com/pubgrub-rs/pubgrub/compare/release...dev
 [0.2.1-diff]: https://github.com/pubgrub-rs/pubgrub/compare/v0.2.1...v0.3.0
 [0.2.0-diff]: https://github.com/pubgrub-rs/pubgrub/compare/v0.2.0...v0.2.1
