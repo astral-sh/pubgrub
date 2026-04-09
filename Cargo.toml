@@ -19,6 +19,8 @@ license = "MPL-2.0"
 keywords = ["dependency", "pubgrub", "semver", "solver", "version"]
 categories = ["algorithms"]
 include = ["Cargo.toml", "LICENSE", "README.md", "src/**", "tests/**", "examples/**", "benches/**"]
+# NOTE: Keep in sync with `ci.yml`
+rust-version = "1.92"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
