@@ -42,6 +42,11 @@ criterion = { version = "4.0.1", package = "codspeed-criterion-compat" }
 env_logger = "0.11.6"
 proptest = "1.6.0"
 ron = "0.12.0"
+# `-Zminimal-versions` floors: keep the transitive `rustix` off 0.37 (broken
+# on current nightly, see bytecodealliance/rustix#1620). Two roots pull it:
+# `proptest -> tempfile` and `codspeed-criterion-compat -> is-terminal`.
+is-terminal = "0.4.8"
+tempfile = "3.7"
 varisat = "0.2.2"
 version-ranges = { version = "0.1.0", path = "version-ranges", package = "astral-version-ranges", features = ["proptest"] }
 
