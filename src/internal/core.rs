@@ -12,6 +12,54 @@ use crate::internal::{
 };
 use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, VersionSet};
 
+/// Tracks, for each incompatibility, the decision level at which it was last found to be
+/// contradicted (if any).
+///
+/// Incompatibility ids are dense `u32` arena indices, so this is stored as a flat `Vec` indexed
+/// by the raw id with a sentinel for "not currently contradicted", rather than a hash map. This
+/// makes the `is_contradicted` check on the hot `unit_propagation` path a bounds-checked array
+/// load instead of a hash lookup, which matters because that check runs many times per
+/// incompatibility per propagation round.
+#[derive(Clone, Debug, Default)]
+struct ContradictedIncompatibilities {
+    /// `levels[id] == NOT_CONTRADICTED` means the incompatibility is not currently contradicted;
+    /// otherwise it stores the `DecisionLevel` (as `u32`) at which it was found contradicted.
+    levels: Vec<u32>,
+}
+
+impl ContradictedIncompatibilities {
+    /// Sentinel value meaning "not currently contradicted". `DecisionLevel` is the number of
+    /// decisions made, which cannot reach `u32::MAX` in practice.
+    const NOT_CONTRADICTED: u32 = u32::MAX;
+
+    #[inline]
+    fn is_contradicted<T>(&self, id: Id<T>) -> bool {
+        self.levels
+            .get(id.into_raw())
+            .is_some_and(|&dl| dl != Self::NOT_CONTRADICTED)
+    }
+
+    #[inline]
+    fn insert<T>(&mut self, id: Id<T>, decision_level: DecisionLevel) {
+        let idx = id.into_raw();
+        if idx >= self.levels.len() {
+            self.levels.resize(idx + 1, Self::NOT_CONTRADICTED);
+        }
+        self.levels[idx] = decision_level.0;
+    }
+
+    /// Forget every entry recorded at a decision level strictly greater than `decision_level`.
+    #[inline]
+    fn retain_le(&mut self, decision_level: DecisionLevel) {
+        let threshold = decision_level.0;
+        for dl in &mut self.levels {
+            if *dl != Self::NOT_CONTRADICTED && *dl > threshold {
+                *dl = Self::NOT_CONTRADICTED;
+            }
+        }
+    }
+}
+
 /// Current state of the PubGrub algorithm.
 #[derive(Clone)]
 pub struct State<DP: DependencyProvider> {
@@ -27,7 +75,7 @@ pub struct State<DP: DependencyProvider> {
     ///
     /// For each one keep track of the decision level when it was found to be contradicted.
     /// These will stay contradicted until we have backtracked beyond its associated decision level.
-    contradicted_incompatibilities: Map<IncompDpId<DP>, DecisionLevel>,
+    contradicted_incompatibilities: ContradictedIncompatibilities,
 
     /// All incompatibilities expressing dependencies,
     /// with common dependents merged.
@@ -65,7 +113,7 @@ impl<DP: DependencyProvider> State<DP> {
             root_package,
             root_version,
             incompatibilities,
-            contradicted_incompatibilities: Map::default(),
+            contradicted_incompatibilities: ContradictedIncompatibilities::default(),
             partial_solution: PartialSolution::empty(),
             incompatibility_store,
             package_store,
@@ -179,7 +227,7 @@ impl<DP: DependencyProvider> State<DP> {
             for &incompat_id in self.incompatibilities[&current_package].iter().rev() {
                 if self
                     .contradicted_incompatibilities
-                    .contains_key(&incompat_id)
+                    .is_contradicted(incompat_id)
                 {
                     continue;
                 }
@@ -334,7 +382,7 @@ impl<DP: DependencyProvider> State<DP> {
         self.partial_solution.backtrack(decision_level);
         // Remove contradicted incompatibilities that depend on decisions we just backtracked away.
         self.contradicted_incompatibilities
-            .retain(|_, dl| *dl <= decision_level);
+            .retain_le(decision_level);
         if incompat_changed {
             self.merge_incompatibility(incompat);
         }
@@ -351,7 +399,7 @@ impl<DP: DependencyProvider> State<DP> {
         let new_decision_level = self.partial_solution.backtrack_package(package).ok()?;
         // Remove contradicted incompatibilities that depend on decisions we just backtracked away.
         self.contradicted_incompatibilities
-            .retain(|_, dl| *dl <= new_decision_level);
+            .retain_le(new_decision_level);
         Some(base_decision_level.0 - new_decision_level.0)
     }
 
