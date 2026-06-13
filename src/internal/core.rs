@@ -16,45 +16,45 @@ use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, VersionSet
 /// contradicted (if any).
 ///
 /// Incompatibility ids are dense `u32` arena indices, so this is stored as a flat `Vec` indexed
-/// by the raw id with a sentinel for "not currently contradicted", rather than a hash map. This
+/// by the raw id, with `None` for "not currently contradicted", rather than a hash map. This
 /// makes the `is_contradicted` check on the hot `unit_propagation` path a bounds-checked array
 /// load instead of a hash lookup, which matters because that check runs many times per
-/// incompatibility per propagation round.
+/// incompatibility per propagation round. `DecisionLevel` carries a niche, so each entry is
+/// `Option<DecisionLevel>` in 4 bytes, no wider than a bare id-to-level array would be.
 #[derive(Clone, Debug, Default)]
 struct ContradictedIncompatibilities {
-    /// `levels[id] == NOT_CONTRADICTED` means the incompatibility is not currently contradicted;
-    /// otherwise it stores the `DecisionLevel` (as `u32`) at which it was found contradicted.
-    levels: Vec<u32>,
+    /// `levels[id]` is `Some(dl)` if the incompatibility was found contradicted at decision
+    /// level `dl`, and `None` if it is not currently contradicted.
+    levels: Vec<Option<DecisionLevel>>,
 }
 
 impl ContradictedIncompatibilities {
-    /// Sentinel value meaning "not currently contradicted". `DecisionLevel` is the number of
-    /// decisions made, which cannot reach `u32::MAX` in practice.
-    const NOT_CONTRADICTED: u32 = u32::MAX;
-
     #[inline]
     fn is_contradicted<T>(&self, id: Id<T>) -> bool {
-        self.levels
-            .get(id.into_raw())
-            .is_some_and(|&dl| dl != Self::NOT_CONTRADICTED)
+        matches!(self.levels.get(id.into_raw()), Some(Some(_)))
     }
 
     #[inline]
     fn insert<T>(&mut self, id: Id<T>, decision_level: DecisionLevel) {
         let idx = id.into_raw();
         if idx >= self.levels.len() {
-            self.levels.resize(idx + 1, Self::NOT_CONTRADICTED);
+            self.levels.resize(idx + 1, None);
         }
-        self.levels[idx] = decision_level.0;
+        self.levels[idx] = Some(decision_level);
     }
 
     /// Forget every entry recorded at a decision level strictly greater than `decision_level`.
     #[inline]
     fn retain_le(&mut self, decision_level: DecisionLevel) {
-        let threshold = decision_level.0;
-        for dl in &mut self.levels {
-            if *dl != Self::NOT_CONTRADICTED && *dl > threshold {
-                *dl = Self::NOT_CONTRADICTED;
+        // `None` is the niche (the all-zero word), so it orders below every
+        // `Some(level)`. That makes `slot > Some(decision_level)` true exactly
+        // for the contradicted entries above the threshold and false for `None`,
+        // so this lowers to a single flat comparison per slot with no separate
+        // is-contradicted branch.
+        let limit = Some(decision_level);
+        for slot in &mut self.levels {
+            if *slot > limit {
+                *slot = None;
             }
         }
     }
@@ -400,7 +400,7 @@ impl<DP: DependencyProvider> State<DP> {
         // Remove contradicted incompatibilities that depend on decisions we just backtracked away.
         self.contradicted_incompatibilities
             .retain_le(new_decision_level);
-        Some(base_decision_level.0 - new_decision_level.0)
+        Some(base_decision_level.get() - new_decision_level.get())
     }
 
     /// Add this incompatibility into the set of all incompatibilities.
