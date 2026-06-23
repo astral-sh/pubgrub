@@ -6,6 +6,7 @@
     ":configMigration",
     ":semanticCommitsDisabled"
   ],
+  "minimumReleaseAge": "24 hours",
   "schedule": [
     "before 4am on the first day of the month"
   ]
