@@ -85,7 +85,9 @@ impl<DP: DependencyProvider> State<DP> {
     }
 
     /// Add an incompatibility to the state.
-    pub fn add_incompatibility(&mut self, incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
+    pub fn add_incompatibility(&mut self, mut incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
+        // Cached contradictions are only valid in the state that recorded them.
+        incompat.reset_contradiction_cache();
         let id = self.incompatibility_store.alloc(incompat);
         self.merge_incompatibility(id);
     }
