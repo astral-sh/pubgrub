@@ -852,7 +852,7 @@ impl<V: Ord + Clone> Ranges<V> {
     }
 
     /// Iterate over the parts of the range.
-    pub fn iter(&self) -> impl Iterator<Item = (&Bound<V>, &Bound<V>)> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = (&Bound<V>, &Bound<V>)> {
         self.segments.iter().map(|(start, end)| (start, end))
     }
 }
@@ -1384,6 +1384,20 @@ pub mod tests {
             let actual =  Ranges::from_iter(segments.clone());
             assert_eq!(expected, actual, "{segments:?}");
         }
+    }
+
+    #[test]
+    fn iter_is_double_ended() {
+        let range = Ranges::from_iter([(Included(1), Excluded(2)), (Included(3), Excluded(4))]);
+
+        assert_eq!(
+            range
+                .iter()
+                .rev()
+                .map(|(start, end)| (*start, *end))
+                .collect::<Vec<_>>(),
+            [(Included(3), Excluded(4)), (Included(1), Excluded(2))]
+        );
     }
 
     #[test]
