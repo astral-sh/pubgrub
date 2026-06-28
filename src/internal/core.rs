@@ -64,17 +64,54 @@ impl<DP: DependencyProvider> ContradictedIncompatibilities<DP> {
     /// Forget every entry recorded at a decision level strictly greater than `decision_level`.
     #[inline]
     fn retain_le(&mut self, decision_level: DecisionLevel) {
-        // `None` is the niche (the all-zero word), so it orders below every
-        // `Some(level)`. That makes `slot > Some(decision_level)` true exactly
-        // for the contradicted entries above the threshold and false for `None`,
-        // so this lowers to a single flat comparison per slot with no separate
-        // is-contradicted branch.
+        // `Option` orders `None` below every `Some(level)`. Therefore,
+        // `slot > Some(decision_level)` is true exactly for contradicted entries
+        // above the threshold and false for `None`.
         let limit = Some(decision_level);
         for slot in &mut self.levels {
             if *slot > limit {
                 *slot = None;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{OfflineDependencyProvider, Ranges};
+
+    type TestProvider = OfflineDependencyProvider<&'static str, Ranges<u32>>;
+
+    #[test]
+    fn contradicted_incompatibilities_track_and_backtrack_levels() {
+        let mut packages = HashArena::new();
+        let root = packages.alloc("root");
+        let mut incompatibilities: Arena<Incompatibility<&str, Ranges<u32>, String>> = Arena::new();
+        let ids: [IncompDpId<TestProvider>; 3] =
+            std::array::from_fn(|_| incompatibilities.alloc(Incompatibility::not_root(root, 0)));
+
+        let mut contradicted = ContradictedIncompatibilities::<TestProvider>::default();
+        contradicted.insert(ids[2], DecisionLevel::new(3));
+
+        assert_eq!(contradicted.levels.len(), 3);
+        assert!(!contradicted.is_contradicted(ids[0]));
+        assert!(!contradicted.is_contradicted(ids[1]));
+        assert!(contradicted.is_contradicted(ids[2]));
+
+        contradicted.insert(ids[0], DecisionLevel::new(1));
+        contradicted.insert(ids[1], DecisionLevel::new(2));
+        contradicted.retain_le(DecisionLevel::new(2));
+
+        assert!(contradicted.is_contradicted(ids[0]));
+        assert!(contradicted.is_contradicted(ids[1]));
+        assert!(!contradicted.is_contradicted(ids[2]));
+
+        contradicted.retain_le(DecisionLevel::ZERO);
+
+        assert!(!contradicted.is_contradicted(ids[0]));
+        assert!(!contradicted.is_contradicted(ids[1]));
+        assert!(!contradicted.is_contradicted(ids[2]));
     }
 }
 
