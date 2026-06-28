@@ -60,9 +60,7 @@ impl Debug for DecisionLevel {
 // The niche is the whole point: `Option<DecisionLevel>` must stay as small as a
 // bare `u32` so `core`'s contradicted-incompatibility map pays nothing for the
 // readability of `Vec<Option<DecisionLevel>>`.
-const _: () = assert!(
-    std::mem::size_of::<Option<DecisionLevel>>() == std::mem::size_of::<u32>()
-);
+const _: () = assert!(std::mem::size_of::<Option<DecisionLevel>>() == std::mem::size_of::<u32>());
 
 /// The partial solution contains all package assignments,
 /// organized by package and historically ordered.
@@ -411,7 +409,8 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                     }
                     panic!(
                         "Derivations in the Decision part. Decision level {}\n{}",
-                        self.current_decision_level.get(), context
+                        self.current_decision_level.get(),
+                        context
                     )
                 }
             })
