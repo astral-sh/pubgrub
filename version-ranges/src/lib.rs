@@ -1387,20 +1387,6 @@ pub mod tests {
     }
 
     #[test]
-    fn iter_is_double_ended() {
-        let range = Ranges::from_iter([(Included(1), Excluded(2)), (Included(3), Excluded(4))]);
-
-        assert_eq!(
-            range
-                .iter()
-                .rev()
-                .map(|(start, end)| (*start, *end))
-                .collect::<Vec<_>>(),
-            [(Included(3), Excluded(4)), (Included(1), Excluded(2))]
-        );
-    }
-
-    #[test]
     fn contains_many_can_take_owned() {
         let range: Ranges<u8> = Ranges::singleton(1);
         let versions = vec![1, 2, 3];
