@@ -66,6 +66,92 @@ impl<T> Id<T> {
     }
 }
 
+/// A map optimized for dense [`Id`] keys.
+///
+/// Values are stored at the raw index of their key. The map contains every id through the highest
+/// inserted id; inserting a later id fills skipped indices with `V::default()`.
+pub struct IdMap<K, V> {
+    data: Vec<V>,
+    _key: PhantomData<fn() -> K>,
+}
+
+impl<K, V: Clone> Clone for IdMap<K, V> {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            _key: PhantomData,
+        }
+    }
+}
+
+impl<K, V> Default for IdMap<K, V> {
+    fn default() -> Self {
+        Self {
+            data: Vec::new(),
+            _key: PhantomData,
+        }
+    }
+}
+
+impl<K, V> IdMap<K, V> {
+    /// Returns the value associated with `id`, if present.
+    #[inline]
+    pub fn get(&self, id: &Id<K>) -> Option<&V> {
+        self.data.get(id.into_raw())
+    }
+
+    /// Returns the mutable value associated with `id`, if present.
+    #[inline]
+    pub fn get_mut(&mut self, id: &Id<K>) -> Option<&mut V> {
+        self.data.get_mut(id.into_raw())
+    }
+
+    /// Sets the value associated with `id`.
+    #[inline]
+    pub fn set(&mut self, id: Id<K>, value: V)
+    where
+        V: Default,
+    {
+        let index = id.into_raw();
+        if index >= self.data.len() {
+            self.data.resize_with(index, V::default);
+            self.data.push(value);
+        } else {
+            self.data[index] = value;
+        }
+    }
+
+    #[inline]
+    pub(crate) fn get_or_insert_default(&mut self, id: Id<K>) -> &mut V
+    where
+        V: Default,
+    {
+        let index = id.into_raw();
+        if index >= self.data.len() {
+            self.data.resize_with(index + 1, V::default);
+        }
+        &mut self.data[index]
+    }
+}
+
+impl<K, V> Index<Id<K>> for IdMap<K, V> {
+    type Output = V;
+
+    #[inline]
+    fn index(&self, id: Id<K>) -> &Self::Output {
+        self.get(&id).expect("id is not present in map")
+    }
+}
+
+impl<K, V> Index<&Id<K>> for IdMap<K, V> {
+    type Output = V;
+
+    #[inline]
+    fn index(&self, id: &Id<K>) -> &Self::Output {
+        self.get(id).expect("id is not present in map")
+    }
+}
+
 /// Yet another index-based arena.
 ///
 /// An arena is a kind of simple grow-only allocator, backed by a `Vec`
@@ -171,5 +257,27 @@ impl<T: Hash + Eq> Index<Id<T>> for HashArena<T> {
     type Output = T;
     fn index(&self, id: Id<T>) -> &T {
         &self.data[id.raw as usize]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn id_map_fills_skipped_ids_with_default_values() {
+        let mut keys = Arena::new();
+        let first = keys.alloc(());
+        let second = keys.alloc(());
+        let mut map = IdMap::default();
+
+        map.set(second, 2);
+        assert_eq!(map.get(&first), Some(&0));
+        assert_eq!(map[second], 2);
+
+        *map.get_or_insert_default(first) = 1;
+        assert_eq!(map[first], 1);
+        map.set(first, 3);
+        assert_eq!(map[first], 3);
     }
 }

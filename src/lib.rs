@@ -242,6 +242,6 @@ pub use version_ranges::Ranges as Range;
 pub use version_set::VersionSet;
 
 // uv-specific additions
-pub use internal::{Id, IncompId, Incompatibility, Kind, State};
+pub use internal::{Id, IdMap, IncompId, Incompatibility, Kind, State};
 
 mod internal;

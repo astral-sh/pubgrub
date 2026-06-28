@@ -16,6 +16,6 @@ pub(crate) use small_map::SmallMap;
 pub(crate) use small_vec::SmallVec;
 
 // uv-specific additions
-pub use arena::Id;
+pub use arena::{Id, IdMap};
 pub use core::State;
 pub use incompatibility::{IncompId, Incompatibility, Kind};

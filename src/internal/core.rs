@@ -8,8 +8,8 @@ use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::internal::{
-    Arena, DecisionLevel, HashArena, Id, IncompDpId, IncompId, Incompatibility, PartialSolution,
-    Relation, SatisfierSearch, SmallVec,
+    Arena, DecisionLevel, HashArena, Id, IdMap, IncompDpId, IncompId, Incompatibility,
+    PartialSolution, Relation, SatisfierSearch, SmallVec,
 };
 use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, VersionSet};
 
@@ -127,8 +127,7 @@ pub struct State<DP: DependencyProvider> {
     root_version: DP::V,
 
     /// All incompatibilities indexed by package.
-    #[allow(clippy::type_complexity)]
-    pub incompatibilities: Map<Id<DP::P>, Vec<IncompDpId<DP>>>,
+    pub incompatibilities: IdMap<DP::P, Vec<IncompDpId<DP>>>,
 
     /// As an optimization, store the ids of incompatibilities that are already contradicted.
     ///
@@ -166,8 +165,8 @@ impl<DP: DependencyProvider> State<DP> {
             root_package,
             root_version.clone(),
         ));
-        let mut incompatibilities = Map::default();
-        incompatibilities.insert(root_package, vec![not_root_id]);
+        let mut incompatibilities = IdMap::default();
+        incompatibilities.set(root_package, vec![not_root_id]);
         Self {
             root_package,
             root_version,
@@ -489,8 +488,7 @@ impl<DP: DependencyProvider> State<DP> {
                 let new = self.incompatibility_store.alloc(merged);
                 for (pkg, _) in self.incompatibility_store[new].iter() {
                     self.incompatibilities
-                        .entry(pkg)
-                        .or_default()
+                        .get_or_insert_default(pkg)
                         .retain(|id| id != past);
                 }
                 *past = new;
@@ -503,7 +501,7 @@ impl<DP: DependencyProvider> State<DP> {
             if cfg!(debug_assertions) {
                 assert_ne!(term, &crate::term::Term::any());
             }
-            self.incompatibilities.entry(pkg).or_default().push(id);
+            self.incompatibilities.get_or_insert_default(pkg).push(id);
         }
     }
 
