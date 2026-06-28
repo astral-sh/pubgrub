@@ -12,6 +12,14 @@ use crate::internal::{
 };
 use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, VersionSet};
 
+#[derive(Clone)]
+struct DependencyIncompatibilities<I> {
+    /// An unmerged incompatibility used to detect a new dependent version.
+    version_marker: I,
+    previous: SmallVec<I>,
+    current: SmallVec<I>,
+}
+
 /// Current state of the PubGrub algorithm.
 #[derive(Clone)]
 pub struct State<DP: DependencyProvider> {
@@ -32,7 +40,7 @@ pub struct State<DP: DependencyProvider> {
     /// All incompatibilities expressing dependencies,
     /// with common dependents merged.
     #[allow(clippy::type_complexity)]
-    merged_dependencies: Map<(Id<DP::P>, Id<DP::P>), SmallVec<IncompDpId<DP>>>,
+    merged_dependencies: Map<(Id<DP::P>, Id<DP::P>), DependencyIncompatibilities<IncompDpId<DP>>>,
 
     /// Partial solution.
     pub partial_solution: PartialSolution<DP>,
@@ -372,25 +380,54 @@ impl<DP: DependencyProvider> State<DP> {
     /// without having to check the existence of other versions though.
     fn merge_incompatibility(&mut self, mut id: IncompDpId<DP>) {
         if let Some((p1, p2)) = self.incompatibility_store[id].as_dependency() {
-            // Only adjacent package versions should be merged. The most recent dependency is last;
-            // scanning older, distinct ranges makes inserting many versions quadratic.
-            let deps_lookup = self.merged_dependencies.entry((p1, p2)).or_default();
-            if let Some((past, merged)) = deps_lookup.as_mut_slice().last_mut().and_then(|past| {
-                self.incompatibility_store[id]
-                    .merge_dependents(&self.incompatibility_store[*past])
-                    .map(|merged| (past, merged))
-            }) {
+            let deps_lookup = self.merged_dependencies.entry((p1, p2)).or_insert_with(|| {
+                DependencyIncompatibilities {
+                    version_marker: id,
+                    previous: SmallVec::default(),
+                    current: SmallVec::default(),
+                }
+            });
+            if self.incompatibility_store[deps_lookup.version_marker].get(p1)
+                != self.incompatibility_store[id].get(p1)
+            {
+                deps_lookup.version_marker = id;
+                deps_lookup.previous = std::mem::take(&mut deps_lookup.current);
+            }
+
+            // Search only the groups for this package version and the preceding one. Keeping the
+            // groups separate bounds the lookup while supporting repeated dependency constraints.
+            let merge = deps_lookup
+                .current
+                .iter()
+                .enumerate()
+                .find_map(|(index, &past)| {
+                    self.incompatibility_store[id]
+                        .merge_dependents(&self.incompatibility_store[past])
+                        .map(|merged| (past, merged, Some(index)))
+                })
+                .or_else(|| {
+                    deps_lookup.previous.iter().find_map(|&past| {
+                        self.incompatibility_store[id]
+                            .merge_dependents(&self.incompatibility_store[past])
+                            .map(|merged| (past, merged, None))
+                    })
+                });
+            if let Some((past, merged, current_index)) = merge {
                 let new = self.incompatibility_store.alloc(merged);
                 for (pkg, _) in self.incompatibility_store[new].iter() {
                     self.incompatibilities
                         .entry(pkg)
                         .or_default()
-                        .retain(|id| id != past);
+                        .retain(|id| id != &past);
                 }
-                *past = new;
+                if let Some(index) = current_index {
+                    deps_lookup.current.as_mut_slice()[index] = new;
+                } else {
+                    deps_lookup.current.push(new);
+                }
                 id = new;
             } else {
-                deps_lookup.push(id);
+                deps_lookup.current.push(id);
             }
         }
         for (pkg, term) in self.incompatibility_store[id].iter() {
@@ -439,5 +476,33 @@ impl<DP: DependencyProvider> State<DP> {
         }
         // Now the user can refer to the entire tree from its root.
         Arc::into_inner(precomputed.remove(&incompat).unwrap()).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{OfflineDependencyProvider, Ranges};
+
+    use super::State;
+
+    #[test]
+    fn merge_repeated_dependencies_across_versions() {
+        let mut state: State<OfflineDependencyProvider<&str, Ranges<u32>>> = State::init("root", 0);
+        let package = state.package_store.alloc("package");
+
+        for version in 0..10 {
+            state.add_incompatibility_from_dependencies(
+                package,
+                version,
+                [
+                    ("dependency", Ranges::singleton(1u32)),
+                    ("dependency", Ranges::singleton(2u32)),
+                ],
+            );
+        }
+
+        let dependency = state.package_store.alloc("dependency");
+        assert_eq!(state.incompatibilities[&package].len(), 2);
+        assert_eq!(state.incompatibilities[&dependency].len(), 2);
     }
 }
