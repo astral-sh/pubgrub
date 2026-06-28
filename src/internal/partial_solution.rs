@@ -46,6 +46,7 @@ impl DecisionLevel {
         self.0.get() - 1
     }
 
+    /// Advances to the next decision level, panicking if the representation is exhausted.
     pub(crate) fn increment(self) -> Self {
         Self(self.0.checked_add(1).expect("decision level overflow"))
     }

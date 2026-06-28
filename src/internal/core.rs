@@ -4,6 +4,7 @@
 //! to write a functional PubGrub algorithm.
 
 use std::collections::HashSet as Set;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::internal::{
@@ -25,14 +26,14 @@ struct ContradictedIncompatibilities<DP: DependencyProvider> {
     /// `levels[id]` is `Some(dl)` if the incompatibility was found contradicted at decision
     /// level `dl`, and `None` if it is not currently contradicted.
     levels: Vec<Option<DecisionLevel>>,
-    _provider: std::marker::PhantomData<fn() -> DP>,
+    _provider: PhantomData<fn() -> DP>,
 }
 
 impl<DP: DependencyProvider> Clone for ContradictedIncompatibilities<DP> {
     fn clone(&self) -> Self {
         Self {
             levels: self.levels.clone(),
-            _provider: std::marker::PhantomData,
+            _provider: PhantomData,
         }
     }
 }
@@ -41,17 +42,21 @@ impl<DP: DependencyProvider> Default for ContradictedIncompatibilities<DP> {
     fn default() -> Self {
         Self {
             levels: Vec::new(),
-            _provider: std::marker::PhantomData,
+            _provider: PhantomData,
         }
     }
 }
 
 impl<DP: DependencyProvider> ContradictedIncompatibilities<DP> {
+    /// Returns whether `id` is currently contradicted.
+    ///
+    /// IDs beyond the allocated slots have not been seen yet and therefore return `false`.
     #[inline]
     fn is_contradicted(&self, id: IncompDpId<DP>) -> bool {
         matches!(self.levels.get(id.into_raw()), Some(Some(_)))
     }
 
+    /// Records that `id` is contradicted at `decision_level`, growing the dense table as needed.
     #[inline]
     fn insert(&mut self, id: IncompDpId<DP>, decision_level: DecisionLevel) {
         let idx = id.into_raw();
@@ -92,26 +97,25 @@ mod tests {
             std::array::from_fn(|_| incompatibilities.alloc(Incompatibility::not_root(root, 0)));
 
         let mut contradicted = ContradictedIncompatibilities::<TestProvider>::default();
+        let statuses = |contradicted: &ContradictedIncompatibilities<TestProvider>| {
+            ids.map(|id| contradicted.is_contradicted(id))
+        };
+        assert_eq!(statuses(&contradicted), [false; 3]);
+
         contradicted.insert(ids[2], DecisionLevel::new(3));
 
         assert_eq!(contradicted.levels.len(), 3);
-        assert!(!contradicted.is_contradicted(ids[0]));
-        assert!(!contradicted.is_contradicted(ids[1]));
-        assert!(contradicted.is_contradicted(ids[2]));
+        assert_eq!(statuses(&contradicted), [false, false, true]);
 
         contradicted.insert(ids[0], DecisionLevel::new(1));
         contradicted.insert(ids[1], DecisionLevel::new(2));
         contradicted.retain_le(DecisionLevel::new(2));
 
-        assert!(contradicted.is_contradicted(ids[0]));
-        assert!(contradicted.is_contradicted(ids[1]));
-        assert!(!contradicted.is_contradicted(ids[2]));
+        assert_eq!(statuses(&contradicted), [true, true, false]);
 
         contradicted.retain_le(DecisionLevel::ZERO);
 
-        assert!(!contradicted.is_contradicted(ids[0]));
-        assert!(!contradicted.is_contradicted(ids[1]));
-        assert!(!contradicted.is_contradicted(ids[2]));
+        assert_eq!(statuses(&contradicted), [false; 3]);
     }
 }
 
