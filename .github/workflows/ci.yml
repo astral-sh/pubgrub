@@ -84,11 +84,11 @@ jobs:
 
       - run: rustup toolchain install nightly
 
-      - run: cargo +nightly update -Zminimal-versions
+      - run: cargo +nightly update -Zdirect-minimal-versions
 
-      - run: cargo +nightly build --workspace
+      - run: cargo build --workspace
 
-      - run: cargo +nightly test --all-features --workspace
+      - run: cargo test --all-features --workspace
 
   minimal-rust-version:
     name: Minimum Rust version
