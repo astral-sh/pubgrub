@@ -21,21 +21,39 @@ use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, VersionSet
 /// load instead of a hash lookup, which matters because that check runs many times per
 /// incompatibility per propagation round. `DecisionLevel` carries a niche, so each entry is
 /// `Option<DecisionLevel>` in 4 bytes, no wider than a bare id-to-level array would be.
-#[derive(Clone, Debug, Default)]
-struct ContradictedIncompatibilities {
+struct ContradictedIncompatibilities<DP: DependencyProvider> {
     /// `levels[id]` is `Some(dl)` if the incompatibility was found contradicted at decision
     /// level `dl`, and `None` if it is not currently contradicted.
     levels: Vec<Option<DecisionLevel>>,
+    _provider: std::marker::PhantomData<fn() -> DP>,
 }
 
-impl ContradictedIncompatibilities {
+impl<DP: DependencyProvider> Clone for ContradictedIncompatibilities<DP> {
+    fn clone(&self) -> Self {
+        Self {
+            levels: self.levels.clone(),
+            _provider: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<DP: DependencyProvider> Default for ContradictedIncompatibilities<DP> {
+    fn default() -> Self {
+        Self {
+            levels: Vec::new(),
+            _provider: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<DP: DependencyProvider> ContradictedIncompatibilities<DP> {
     #[inline]
-    fn is_contradicted<T>(&self, id: Id<T>) -> bool {
+    fn is_contradicted(&self, id: IncompDpId<DP>) -> bool {
         matches!(self.levels.get(id.into_raw()), Some(Some(_)))
     }
 
     #[inline]
-    fn insert<T>(&mut self, id: Id<T>, decision_level: DecisionLevel) {
+    fn insert(&mut self, id: IncompDpId<DP>, decision_level: DecisionLevel) {
         let idx = id.into_raw();
         if idx >= self.levels.len() {
             self.levels.resize(idx + 1, None);
@@ -75,7 +93,7 @@ pub struct State<DP: DependencyProvider> {
     ///
     /// For each one keep track of the decision level when it was found to be contradicted.
     /// These will stay contradicted until we have backtracked beyond its associated decision level.
-    contradicted_incompatibilities: ContradictedIncompatibilities,
+    contradicted_incompatibilities: ContradictedIncompatibilities<DP>,
 
     /// All incompatibilities expressing dependencies,
     /// with common dependents merged.
