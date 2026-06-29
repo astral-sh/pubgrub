@@ -1,7 +1,7 @@
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
-use std::ops::{Index, Range};
+use std::ops::{Index, IndexMut, Range};
 
 type FnvIndexSet<V> = indexmap::IndexSet<V, rustc_hash::FxBuildHasher>;
 
@@ -117,6 +117,12 @@ impl<T> Index<Id<T>> for Arena<T> {
     type Output = T;
     fn index(&self, id: Id<T>) -> &T {
         &self.data[id.raw as usize]
+    }
+}
+
+impl<T> IndexMut<Id<T>> for Arena<T> {
+    fn index_mut(&mut self, id: Id<T>) -> &mut Self::Output {
+        &mut self.data[id.raw as usize]
     }
 }
 

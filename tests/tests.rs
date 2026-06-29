@@ -1,12 +1,45 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use pubgrub::{
-    Dependencies, DependencyProvider, OfflineDependencyProvider, Package,
-    PackageResolutionStatistics, PubGrubError, Ranges, VersionSet, resolve,
+    Dependencies, DependencyProvider, Incompatibility, OfflineDependencyProvider, Package,
+    PackageResolutionStatistics, PubGrubError, Ranges, State, VersionSet, resolve,
 };
 use std::convert::Infallible;
 
 type NumVS = Ranges<u32>;
+
+#[test]
+fn cloned_incompatibility_does_not_reuse_contradiction_cache() {
+    type Provider = OfflineDependencyProvider<String, NumVS>;
+
+    let mut base: State<Provider> = State::init("root".to_string(), 0);
+    base.unit_propagation(base.root_package).unwrap();
+    base.add_package_version_dependencies(
+        base.root_package,
+        0,
+        [("foo".to_string(), Ranges::full())],
+    );
+    base.unit_propagation(base.root_package).unwrap();
+    let foo = base.package_store.alloc("foo".to_string());
+
+    let mut source = base.clone();
+    source.add_package_version_dependencies(foo, 2, []);
+    source.add_incompatibility(Incompatibility::custom_version(
+        foo,
+        1,
+        "foo 1 is unavailable".to_string(),
+    ));
+    assert!(source.unit_propagation(foo).unwrap().is_empty());
+    let incompatibility_id = *source.incompatibilities[&foo].last().unwrap();
+    let incompatibility = source.incompatibility_store[incompatibility_id].clone();
+
+    let mut target = base;
+    target.add_package_version_dependencies(foo, 1, []);
+    target.add_incompatibility(incompatibility);
+
+    let conflicts = target.unit_propagation(foo).unwrap();
+    assert!(!conflicts.is_empty());
+}
 
 #[test]
 fn same_result_on_repeated_runs() {
