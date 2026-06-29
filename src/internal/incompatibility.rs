@@ -207,6 +207,18 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         (versions, dependency_versions)
     }
 
+    /// Returns the version sets for a dependency incompatibility.
+    ///
+    /// Returns `None` if this is not a dependency incompatibility. The dependency version set in
+    /// the returned pair is `None` when it is empty because empty dependencies are stored without a
+    /// negative term.
+    pub fn dependency_version_sets(&self) -> Option<(&VS, Option<&VS>)> {
+        match &self.kind {
+            Kind::FromDependencyOf(p1, p2) => Some(self.dependency_terms(*p1, *p2)),
+            _ => None,
+        }
+    }
+
     pub(crate) fn as_dependency(&self) -> Option<(Id<P>, Id<P>, Option<&VS>)> {
         match &self.kind {
             Kind::FromDependencyOf(p1, p2) => {
@@ -384,8 +396,9 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 set.clone(),
             )),
             Kind::FromDependencyOf(package, dep_package) => {
-                let (package_versions, dependency_versions) =
-                    store[self_id].dependency_terms(package, dep_package);
+                let (package_versions, dependency_versions) = store[self_id]
+                    .dependency_version_sets()
+                    .expect("matched dependency incompatibility");
                 DerivationTree::External(External::FromDependencyOf(
                     package_store[package].clone(),
                     package_versions.clone(),
@@ -612,6 +625,17 @@ pub(crate) mod tests {
         expected_dependency: &str,
         expected_dependency_versions: &Ranges<usize>,
     ) {
+        let (versions, dependency_versions) = incompatibility
+            .dependency_version_sets()
+            .expect("expected a dependency incompatibility");
+        assert_eq!(versions, expected_versions);
+        match dependency_versions {
+            Some(dependency_versions) => {
+                assert_eq!(dependency_versions, expected_dependency_versions);
+            }
+            None => assert_eq!(expected_dependency_versions, &Ranges::empty()),
+        }
+
         let mut store = Arena::new();
         let id = store.alloc(incompatibility);
         let tree = Incompatibility::build_derivation_tree(
