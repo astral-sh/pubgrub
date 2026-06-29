@@ -4,7 +4,6 @@
 //! to write a functional PubGrub algorithm.
 
 use std::collections::HashSet as Set;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use crate::internal::{
@@ -12,112 +11,6 @@ use crate::internal::{
     Relation, SatisfierSearch, SmallVec,
 };
 use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, VersionSet};
-
-/// Tracks, for each incompatibility, the decision level at which it was last found to be
-/// contradicted (if any).
-///
-/// Incompatibility ids are dense `u32` arena indices, so this is stored as a flat `Vec` indexed
-/// by the raw id, with `None` for "not currently contradicted", rather than a hash map. This
-/// makes the `is_contradicted` check on the hot `unit_propagation` path a bounds-checked array
-/// load instead of a hash lookup, which matters because that check runs many times per
-/// incompatibility per propagation round. `DecisionLevel` carries a niche, so each entry is
-/// `Option<DecisionLevel>` in 4 bytes, no wider than a bare id-to-level array would be.
-struct ContradictedIncompatibilities<DP: DependencyProvider> {
-    /// `levels[id]` is `Some(dl)` if the incompatibility was found contradicted at decision
-    /// level `dl`, and `None` if it is not currently contradicted.
-    levels: Vec<Option<DecisionLevel>>,
-    _provider: PhantomData<fn() -> DP>,
-}
-
-impl<DP: DependencyProvider> Clone for ContradictedIncompatibilities<DP> {
-    fn clone(&self) -> Self {
-        Self {
-            levels: self.levels.clone(),
-            _provider: PhantomData,
-        }
-    }
-}
-
-impl<DP: DependencyProvider> Default for ContradictedIncompatibilities<DP> {
-    fn default() -> Self {
-        Self {
-            levels: Vec::new(),
-            _provider: PhantomData,
-        }
-    }
-}
-
-impl<DP: DependencyProvider> ContradictedIncompatibilities<DP> {
-    /// Returns whether `id` is currently contradicted.
-    ///
-    /// IDs beyond the allocated slots have not been seen yet and therefore return `false`.
-    #[inline]
-    fn is_contradicted(&self, id: IncompDpId<DP>) -> bool {
-        matches!(self.levels.get(id.into_raw()), Some(Some(_)))
-    }
-
-    /// Records that `id` is contradicted at `decision_level`, growing the dense table as needed.
-    #[inline]
-    fn insert(&mut self, id: IncompDpId<DP>, decision_level: DecisionLevel) {
-        let idx = id.into_raw();
-        if idx >= self.levels.len() {
-            self.levels.resize(idx + 1, None);
-        }
-        self.levels[idx] = Some(decision_level);
-    }
-
-    /// Forget every entry recorded at a decision level strictly greater than `decision_level`.
-    #[inline]
-    fn retain_le(&mut self, decision_level: DecisionLevel) {
-        // `Option` orders `None` below every `Some(level)`. Therefore,
-        // `slot > Some(decision_level)` is true exactly for contradicted entries
-        // above the threshold and false for `None`.
-        let limit = Some(decision_level);
-        for slot in &mut self.levels {
-            if *slot > limit {
-                *slot = None;
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{OfflineDependencyProvider, Ranges};
-
-    type TestProvider = OfflineDependencyProvider<&'static str, Ranges<u32>>;
-
-    #[test]
-    fn contradicted_incompatibilities_track_and_backtrack_levels() {
-        let mut packages = HashArena::new();
-        let root = packages.alloc("root");
-        let mut incompatibilities: Arena<Incompatibility<&str, Ranges<u32>, String>> = Arena::new();
-        let ids: [IncompDpId<TestProvider>; 3] =
-            std::array::from_fn(|_| incompatibilities.alloc(Incompatibility::not_root(root, 0)));
-
-        let mut contradicted = ContradictedIncompatibilities::<TestProvider>::default();
-        let statuses = |contradicted: &ContradictedIncompatibilities<TestProvider>| {
-            ids.map(|id| contradicted.is_contradicted(id))
-        };
-        assert_eq!(statuses(&contradicted), [false; 3]);
-
-        contradicted.insert(ids[2], DecisionLevel::new(3));
-
-        assert_eq!(contradicted.levels.len(), 3);
-        assert_eq!(statuses(&contradicted), [false, false, true]);
-
-        contradicted.insert(ids[0], DecisionLevel::new(1));
-        contradicted.insert(ids[1], DecisionLevel::new(2));
-        contradicted.retain_le(DecisionLevel::new(2));
-
-        assert_eq!(statuses(&contradicted), [true, true, false]);
-
-        contradicted.retain_le(DecisionLevel::ZERO);
-
-        assert_eq!(statuses(&contradicted), [false; 3]);
-    }
-}
 
 /// Current state of the PubGrub algorithm.
 #[derive(Clone)]
@@ -129,12 +22,6 @@ pub struct State<DP: DependencyProvider> {
     /// All incompatibilities indexed by package.
     #[allow(clippy::type_complexity)]
     pub incompatibilities: Map<Id<DP::P>, Vec<IncompDpId<DP>>>,
-
-    /// As an optimization, store the ids of incompatibilities that are already contradicted.
-    ///
-    /// For each one keep track of the decision level when it was found to be contradicted.
-    /// These will stay contradicted until we have backtracked beyond its associated decision level.
-    contradicted_incompatibilities: ContradictedIncompatibilities<DP>,
 
     /// All incompatibilities expressing dependencies,
     /// with common dependents merged.
@@ -172,7 +59,6 @@ impl<DP: DependencyProvider> State<DP> {
             root_package,
             root_version,
             incompatibilities,
-            contradicted_incompatibilities: ContradictedIncompatibilities::default(),
             partial_solution: PartialSolution::empty(),
             incompatibility_store,
             package_store,
@@ -199,7 +85,9 @@ impl<DP: DependencyProvider> State<DP> {
     }
 
     /// Add an incompatibility to the state.
-    pub fn add_incompatibility(&mut self, incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
+    pub fn add_incompatibility(&mut self, mut incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
+        // Cached contradictions are only valid in the state that recorded them.
+        incompat.reset_contradiction_cache();
         let id = self.incompatibility_store.alloc(incompat);
         self.merge_incompatibility(id);
     }
@@ -285,8 +173,8 @@ impl<DP: DependencyProvider> State<DP> {
             // We only care about incompatibilities if it contains the current package.
             for &incompat_id in self.incompatibilities[&current_package].iter().rev() {
                 if self
-                    .contradicted_incompatibilities
-                    .is_contradicted(incompat_id)
+                    .partial_solution
+                    .is_contradicted(&self.incompatibility_store[incompat_id])
                 {
                     continue;
                 }
@@ -317,12 +205,12 @@ impl<DP: DependencyProvider> State<DP> {
                             &self.incompatibility_store,
                         );
                         // With the partial solution updated, the incompatibility is now contradicted.
-                        self.contradicted_incompatibilities
-                            .insert(incompat_id, self.partial_solution.current_decision_level());
+                        self.partial_solution
+                            .mark_contradicted(&mut self.incompatibility_store[incompat_id]);
                     }
                     Relation::Contradicted(_) => {
-                        self.contradicted_incompatibilities
-                            .insert(incompat_id, self.partial_solution.current_decision_level());
+                        self.partial_solution
+                            .mark_contradicted(&mut self.incompatibility_store[incompat_id]);
                     }
                     _ => {}
                 }
@@ -343,8 +231,8 @@ impl<DP: DependencyProvider> State<DP> {
                 );
                 // After conflict resolution and the partial solution update,
                 // the root cause incompatibility is now contradicted.
-                self.contradicted_incompatibilities
-                    .insert(root_cause, self.partial_solution.current_decision_level());
+                self.partial_solution
+                    .mark_contradicted(&mut self.incompatibility_store[root_cause]);
             }
         }
         // If there are no more changed packages, unit propagation is done.
@@ -439,9 +327,6 @@ impl<DP: DependencyProvider> State<DP> {
         decision_level: DecisionLevel,
     ) {
         self.partial_solution.backtrack(decision_level);
-        // Remove contradicted incompatibilities that depend on decisions we just backtracked away.
-        self.contradicted_incompatibilities
-            .retain_le(decision_level);
         if incompat_changed {
             self.merge_incompatibility(incompat);
         }
@@ -456,9 +341,6 @@ impl<DP: DependencyProvider> State<DP> {
     pub fn backtrack_package(&mut self, package: Id<DP::P>) -> Option<u32> {
         let base_decision_level = self.partial_solution.current_decision_level();
         let new_decision_level = self.partial_solution.backtrack_package(package).ok()?;
-        // Remove contradicted incompatibilities that depend on decisions we just backtracked away.
-        self.contradicted_incompatibilities
-            .retain_le(new_decision_level);
         Some(base_decision_level.get() - new_decision_level.get())
     }
 

@@ -24,15 +24,15 @@ type FnvIndexSet<T> = indexmap::IndexSet<T, BuildHasherDefault<FxHasher>>;
 ///
 /// The logical level is zero-based, but it is stored as `level + 1` in a
 /// `NonZeroU32` so that `Option<DecisionLevel>` fits in the same 4 bytes as a
-/// bare `u32`, with `None` occupying the all-zero niche. That lets `core`
-/// track contradicted incompatibilities as a compact `Vec<Option<DecisionLevel>>`
-/// instead of a `Vec<u32>` with a hand-rolled sentinel.
+/// bare `u32`, with `None` occupying the all-zero niche.
 #[derive(Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub(crate) struct DecisionLevel(NonZeroU32);
 
 impl DecisionLevel {
     /// Decision level zero: no decisions have been made yet.
     pub(crate) const ZERO: DecisionLevel = DecisionLevel(NonZeroU32::MIN);
+    /// Sentinel greater than any decision level the solver can reach.
+    pub(crate) const MAX: DecisionLevel = DecisionLevel(NonZeroU32::MAX);
 
     /// Build a `DecisionLevel` from its zero-based logical value.
     pub(crate) fn new(level: u32) -> Self {
@@ -58,9 +58,7 @@ impl Debug for DecisionLevel {
     }
 }
 
-// The niche is the whole point: `Option<DecisionLevel>` must stay as small as a
-// bare `u32` so `core`'s contradicted-incompatibility map pays nothing for the
-// readability of `Vec<Option<DecisionLevel>>`.
+// Preserve the niche so `Option<DecisionLevel>` stays as small as a bare `u32`.
 const _: () = assert!(std::mem::size_of::<Option<DecisionLevel>>() == std::mem::size_of::<u32>());
 
 /// The partial solution contains all package assignments,
@@ -100,8 +98,9 @@ pub struct PartialSolution<DP: DependencyProvider> {
     /// Packages whose derivations changed since the last time `prioritize` was called and need
     /// their priorities to be updated.
     outdated_priorities: FnvIndexSet<Id<DP::P>>,
-    /// Whether we have never backtracked, to enable fast path optimizations.
-    has_ever_backtracked: bool,
+    /// For each completed backtrack generation, the highest decision level that remains valid.
+    /// The active generation is represented by the missing entry after the end of this vector.
+    last_valid_decision_levels: Vec<DecisionLevel>,
 }
 
 /// A package assignment is either a decision or a list of (accumulated) derivations without a
@@ -208,8 +207,25 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             package_assignments: FnvIndexMap::default(),
             prioritized_potential_packages: PriorityQueue::default(),
             outdated_priorities: FnvIndexSet::default(),
-            has_ever_backtracked: false,
+            last_valid_decision_levels: vec![DecisionLevel::ZERO],
         }
+    }
+
+    pub(crate) fn is_contradicted(
+        &self,
+        incompatibility: &Incompatibility<DP::P, DP::VS, DP::M>,
+    ) -> bool {
+        incompatibility.is_contradicted(&self.last_valid_decision_levels)
+    }
+
+    pub(crate) fn mark_contradicted(
+        &self,
+        incompatibility: &mut Incompatibility<DP::P, DP::VS, DP::M>,
+    ) {
+        incompatibility.mark_contradicted(
+            self.current_decision_level,
+            self.last_valid_decision_levels.len() as u32,
+        );
     }
 
     pub(crate) fn display<'a>(&'a self, package_store: &'a HashArena<DP::P>) -> impl Display + 'a {
@@ -466,7 +482,14 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                 true
             }
         });
-        self.has_ever_backtracked = true;
+
+        // Close the active generation, then lower every generation invalidated by this backtrack
+        // to the new highest valid decision level.
+        self.last_valid_decision_levels.push(DecisionLevel::MAX);
+        let index = self
+            .last_valid_decision_levels
+            .partition_point(|&level| level <= decision_level);
+        self.last_valid_decision_levels[index..].fill(decision_level);
     }
 
     /// Backtrack the partial solution before a particular package was selected.
@@ -506,7 +529,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         new_incompatibilities: std::ops::Range<IncompId<DP::P, DP::VS, DP::M>>,
         store: &Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
     ) -> Option<IncompId<DP::P, DP::VS, DP::M>> {
-        if !self.has_ever_backtracked {
+        if self.last_valid_decision_levels.len() == 1 {
             // Fast path: Nothing has yet gone wrong during this resolution. This call is unlikely to be the first problem.
             // So let's live with a little bit of risk and add the decision without checking the dependencies.
             // The worst that can happen is we will have to do a full backtrack which only removes this one decision.
