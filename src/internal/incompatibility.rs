@@ -13,14 +13,14 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-struct ContradictionInfo {
+struct ContradictionCache {
     /// The decision level where this incompatibility became contradicted.
     decision_level: DecisionLevel,
     /// The backtrack generation for that decision level.
     backtrack_generation: u32,
 }
 
-impl ContradictionInfo {
+impl ContradictionCache {
     fn not_contradicted() -> Self {
         Self {
             decision_level: DecisionLevel::MAX,
@@ -59,7 +59,7 @@ pub struct Incompatibility<P: Package, VS: VersionSet, M: Eq + Clone + Debug + D
     package_terms: SmallMap<Id<P>, Term<VS>>,
     /// The reason for the incompatibility.
     pub kind: Kind<P, VS, M>,
-    contradiction_info: ContradictionInfo,
+    contradiction_cache: ContradictionCache,
 }
 
 /// Type alias of unique identifiers for incompatibilities.
@@ -130,7 +130,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 Term::Negative(VS::singleton(version.clone())),
             )]),
             kind: Kind::NotRoot(package, version),
-            contradiction_info: ContradictionInfo::not_contradicted(),
+            contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
@@ -143,7 +143,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         Self {
             package_terms: SmallMap::One([(package, term)]),
             kind: Kind::NoVersions(package, set),
-            contradiction_info: ContradictionInfo::not_contradicted(),
+            contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
@@ -157,7 +157,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         Self {
             package_terms: SmallMap::One([(package, term)]),
             kind: Kind::Custom(package, set, metadata),
-            contradiction_info: ContradictionInfo::not_contradicted(),
+            contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
@@ -168,7 +168,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         Self {
             package_terms: SmallMap::One([(package, term)]),
             kind: Kind::Custom(package, set, metadata),
-            contradiction_info: ContradictionInfo::not_contradicted(),
+            contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
@@ -185,7 +185,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 ])
             },
             kind: Kind::FromDependencyOf(package, versions, p2, set2),
-            contradiction_info: ContradictionInfo::not_contradicted(),
+            contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
@@ -267,12 +267,12 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         Self {
             package_terms,
             kind,
-            contradiction_info: ContradictionInfo::not_contradicted(),
+            contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
     pub(crate) fn is_contradicted(&self, last_valid_decision_levels: &[DecisionLevel]) -> bool {
-        self.contradiction_info
+        self.contradiction_cache
             .is_contradicted(last_valid_decision_levels)
     }
 
@@ -281,14 +281,14 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         decision_level: DecisionLevel,
         backtrack_generation: u32,
     ) {
-        self.contradiction_info = ContradictionInfo {
+        self.contradiction_cache = ContradictionCache {
             decision_level,
             backtrack_generation,
         };
     }
 
     pub(crate) fn reset_contradiction_cache(&mut self) {
-        self.contradiction_info = ContradictionInfo::not_contradicted();
+        self.contradiction_cache = ContradictionCache::not_contradicted();
     }
 
     /// Check if an incompatibility should mark the end of the algorithm
@@ -459,8 +459,8 @@ pub(crate) mod tests {
     use crate::{OfflineDependencyProvider, Ranges};
 
     #[test]
-    fn contradiction_info_tracks_backtrack_generations() {
-        let current_generation = ContradictionInfo {
+    fn contradiction_cache_tracks_backtrack_generations() {
+        let current_generation = ContradictionCache {
             decision_level: DecisionLevel::new(3),
             backtrack_generation: 1,
         };
@@ -472,7 +472,7 @@ pub(crate) mod tests {
         // Backtracking to or above that decision level preserves it.
         assert!(current_generation.is_contradicted(&[DecisionLevel::ZERO, DecisionLevel::new(3)]));
 
-        let later_generation = ContradictionInfo {
+        let later_generation = ContradictionCache {
             decision_level: DecisionLevel::new(5),
             backtrack_generation: 2,
         };
@@ -503,13 +503,13 @@ pub(crate) mod tests {
             let i1 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([(p1, t1.clone()), (p2, t2.negate())]),
                 kind: Kind::<_, _, String>::FromDependencyOf(p1, Ranges::full(), p2, Ranges::full()),
-                contradiction_info: ContradictionInfo::not_contradicted(),
+                contradiction_cache: ContradictionCache::not_contradicted(),
             });
 
             let i2 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([(p2, t2), (p3, t3.clone())]),
                 kind: Kind::<_, _, String>::FromDependencyOf(p2, Ranges::full(), p3, Ranges::full()),
-                contradiction_info: ContradictionInfo::not_contradicted(),
+                contradiction_cache: ContradictionCache::not_contradicted(),
             });
 
             let mut i3 = Map::default();
