@@ -396,9 +396,8 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 set.clone(),
             )),
             Kind::FromDependencyOf(package, dep_package) => {
-                let (package_versions, dependency_versions) = store[self_id]
-                    .dependency_version_sets()
-                    .expect("matched dependency incompatibility");
+                let (package_versions, dependency_versions) =
+                    store[self_id].dependency_terms(package, dep_package);
                 DerivationTree::External(External::FromDependencyOf(
                     package_store[package].clone(),
                     package_versions.clone(),
