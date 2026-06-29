@@ -206,39 +206,31 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     /// It is a special case of prior cause computation where the unified package
     /// is the common dependant in the two incompatibilities expressing dependencies.
     pub(crate) fn merge_dependents(&self, other: &Self) -> Option<Self> {
-        // It is almost certainly a bug to call this method without checking that self is a dependency
-        debug_assert!(self.as_dependency().is_some());
-        // Check that both incompatibilities are of the shape p1 depends on p2,
-        // with the same p1 and p2.
-        let (p1, p2, _) = self.as_dependency()?;
-        let (other_p1, other_p2, _) = other.as_dependency()?;
-        if (p1, p2) != (other_p1, other_p2) {
+        let (
+            Kind::FromDependencyOf(p1, versions, p2, dependency_range),
+            Kind::FromDependencyOf(other_p1, other_versions, other_p2, other_dependency_range),
+        ) = (&self.kind, &other.kind)
+        else {
             return None;
-        }
+        };
+
         // We ignore self-dependencies. They are always either trivially true or trivially false,
         // as the package version implies whether the constraint will always be fulfilled or always
         // violated.
         // At time of writing, the public crate API only allowed a map of dependencies,
         // meaning it can't hit this branch, which requires two self-dependencies.
-        if p1 == p2 {
+        if p1 == p2
+            || p1 != other_p1
+            || p2 != other_p2
+            || dependency_range != other_dependency_range
+        {
             return None;
         }
-        let dep_term = self.get(p2);
-        // The dependency range for p2 must be the same in both case
-        // to be able to merge multiple p1 ranges.
-        if dep_term != other.get(p2) {
-            return None;
-        }
+
         Some(Self::from_dependency(
-            p1,
-            self.get(p1)
-                .unwrap()
-                .unwrap_positive()
-                .union(other.get(p1).unwrap().unwrap_positive()), // It is safe to `simplify` here
-            (
-                p2,
-                dep_term.map_or(VS::empty(), |v| v.unwrap_negative().clone()),
-            ),
+            *p1,
+            versions.union(other_versions), // It is safe to `simplify` here.
+            (*p2, dependency_range.clone()),
         ))
     }
 
