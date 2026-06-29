@@ -204,10 +204,13 @@ impl<VS: VersionSet> Term<VS> {
                 SetRelation::Disjoint => Relation::Contradicted,
                 SetRelation::Overlapping => Relation::Inconclusive,
             },
-            (Self::Positive(range), Self::Negative(other)) => match range.relation(other) {
-                SetRelation::Subset => Relation::Contradicted,
-                SetRelation::Disjoint | SetRelation::Overlapping => Relation::Inconclusive,
-            },
+            (Self::Positive(range), Self::Negative(other)) => {
+                if range.subset_of(other) {
+                    Relation::Contradicted
+                } else {
+                    Relation::Inconclusive
+                }
+            }
             (Self::Negative(range), Self::Positive(other)) => {
                 if other == &VS::empty() {
                     Relation::Satisfied
@@ -219,10 +222,13 @@ impl<VS: VersionSet> Term<VS> {
                     }
                 }
             }
-            (Self::Negative(range), Self::Negative(other)) => match range.relation(other) {
-                SetRelation::Subset => Relation::Satisfied,
-                SetRelation::Disjoint | SetRelation::Overlapping => Relation::Inconclusive,
-            },
+            (Self::Negative(range), Self::Negative(other)) => {
+                if range.subset_of(other) {
+                    Relation::Satisfied
+                } else {
+                    Relation::Inconclusive
+                }
+            }
         }
     }
 }
@@ -252,6 +258,47 @@ pub mod tests {
     use proptest::prelude::*;
     use version_ranges::Ranges;
 
+    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+    struct NoDisjointRanges(Ranges<u32>);
+
+    impl Display for NoDisjointRanges {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+
+    impl VersionSet for NoDisjointRanges {
+        type V = u32;
+
+        fn empty() -> Self {
+            Self(Ranges::empty())
+        }
+
+        fn singleton(version: Self::V) -> Self {
+            Self(Ranges::singleton(version))
+        }
+
+        fn complement(&self) -> Self {
+            Self(self.0.complement())
+        }
+
+        fn intersection(&self, other: &Self) -> Self {
+            Self(self.0.intersection(&other.0))
+        }
+
+        fn contains(&self, version: &Self::V) -> bool {
+            self.0.contains(version)
+        }
+
+        fn is_disjoint(&self, _other: &Self) -> bool {
+            panic!("subset-only term relations must not check disjointness")
+        }
+
+        fn subset_of(&self, other: &Self) -> bool {
+            self.0.subset_of(&other.0)
+        }
+    }
+
     pub fn strategy() -> impl Strategy<Value = Term<Ranges<u32>>> {
         prop_oneof![
             version_ranges::proptest_strategy().prop_map(Term::Negative),
@@ -266,6 +313,21 @@ pub mod tests {
         assert!(matches!(
             term.relation_with(&Term::Positive(Ranges::empty())),
             Relation::Satisfied
+        ));
+    }
+
+    #[test]
+    fn subset_only_relations_do_not_check_disjointness() {
+        let one = NoDisjointRanges::singleton(1);
+        let two = NoDisjointRanges::singleton(2);
+
+        assert!(matches!(
+            Term::Positive(one.clone()).relation_with(&Term::Negative(two.clone())),
+            Relation::Inconclusive
+        ));
+        assert!(matches!(
+            Term::Negative(one).relation_with(&Term::Negative(two)),
+            Relation::Inconclusive
         ));
     }
 
