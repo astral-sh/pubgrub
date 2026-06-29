@@ -208,11 +208,17 @@ impl<VS: VersionSet> Term<VS> {
                 SetRelation::Subset => Relation::Contradicted,
                 SetRelation::Disjoint | SetRelation::Overlapping => Relation::Inconclusive,
             },
-            (Self::Negative(range), Self::Positive(other)) => match other.relation(range) {
-                SetRelation::Subset => Relation::Contradicted,
-                SetRelation::Disjoint => Relation::Satisfied,
-                SetRelation::Overlapping => Relation::Inconclusive,
-            },
+            (Self::Negative(range), Self::Positive(other)) => {
+                if other == &VS::empty() {
+                    Relation::Satisfied
+                } else {
+                    match other.relation(range) {
+                        SetRelation::Subset => Relation::Contradicted,
+                        SetRelation::Disjoint => Relation::Satisfied,
+                        SetRelation::Overlapping => Relation::Inconclusive,
+                    }
+                }
+            }
             (Self::Negative(range), Self::Negative(other)) => match range.relation(other) {
                 SetRelation::Subset => Relation::Satisfied,
                 SetRelation::Disjoint | SetRelation::Overlapping => Relation::Inconclusive,
@@ -252,6 +258,17 @@ pub mod tests {
             version_ranges::proptest_strategy().prop_map(Term::Positive),
         ]
     }
+
+    #[test]
+    fn empty_positive_intersection_satisfies_negative_term() {
+        let term = Term::Negative(Ranges::<u32>::singleton(1u32));
+
+        assert!(matches!(
+            term.relation_with(&Term::Positive(Ranges::empty())),
+            Relation::Satisfied
+        ));
+    }
+
     proptest! {
 
         // Testing relation --------------------------------
