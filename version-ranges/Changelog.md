@@ -2,6 +2,10 @@
 
 Changelog for the version-ranges crate.
 
+## v0.1.5 - 2026-06-28
+
+- Add classification of subset, disjoint, and overlapping ranges.
+
 ## v0.1.3 - 2026-04-09
 
 - Add optional `semver` conversions ([#405](https://github.com/pubgrub-rs/pubgrub/pull/405))
