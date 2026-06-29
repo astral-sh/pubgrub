@@ -197,6 +197,8 @@ impl<VS: VersionSet> Term<VS> {
 
     /// Check if a set of terms satisfies or contradicts a given term.
     /// Otherwise the relation is inconclusive.
+    /// Satisfaction takes precedence when an empty positive intersection both satisfies and
+    /// contradicts the term.
     pub(crate) fn relation_with(&self, other_terms_intersection: &Self) -> Relation {
         match (self, other_terms_intersection) {
             (Self::Positive(range), Self::Positive(other)) => match other.relation(range) {
@@ -293,10 +295,6 @@ pub mod tests {
         fn is_disjoint(&self, _other: &Self) -> bool {
             panic!("subset-only term relations must not check disjointness")
         }
-
-        fn subset_of(&self, other: &Self) -> bool {
-            self.0.subset_of(&other.0)
-        }
     }
 
     pub fn strategy() -> impl Strategy<Value = Term<Ranges<u32>>> {
@@ -311,7 +309,7 @@ pub mod tests {
         let term = Term::Negative(Ranges::<u32>::singleton(1u32));
 
         assert!(matches!(
-            term.relation_with(&Term::Positive(Ranges::empty())),
+            term.relation_with(&Term::empty()),
             Relation::Satisfied
         ));
     }
