@@ -400,7 +400,7 @@ impl<DP: DependencyProvider> State<DP> {
         if let Some((p1, p2, dependency_range)) = self.incompatibility_store[id].as_dependency() {
             // Self-dependencies cannot be merged.
             if p1 != p2 {
-                let deps_lookup = self.merged_dependencies.bucket(p1, p2, dependency_range);
+                let deps_lookup = self.merged_dependencies.bucket(p1, p2, &dependency_range);
                 if let Some((past, merged)) =
                     deps_lookup.as_mut_slice().iter_mut().find_map(|past| {
                         self.incompatibility_store[id]

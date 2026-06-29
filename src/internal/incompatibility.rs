@@ -87,11 +87,11 @@ pub enum Kind<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Incompatibility coming from the dependencies of a given package.
     ///
     /// If a@1 depends on b>=1,<2, we create an incompatibility with terms `{a 1, b <1,>=2}` with
-    /// kind `FromDependencyOf(a, 1, b, >=1,<2)`.
+    /// kind `FromDependencyOf(a, b)`. The version sets are stored in the incompatibility terms.
     ///
     /// We can merge multiple dependents with the same version. For example, if a@1 depends on b and
     /// a@2 depends on b, we can say instead a@1||2 depends on b.
-    FromDependencyOf(Id<P>, VS, Id<P>, VS),
+    FromDependencyOf(Id<P>, Id<P>),
     /// Derived from two causes. Stores cause ids.
     ///
     /// For example, if a -> b and b -> c, we can derive a -> c.
@@ -177,21 +177,54 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         let (p2, set2) = dep;
         Self {
             package_terms: if set2 == VS::empty() {
-                SmallMap::One([(package, Term::Positive(versions.clone()))])
+                SmallMap::One([(package, Term::Positive(versions))])
             } else {
                 SmallMap::Two([
-                    (package, Term::Positive(versions.clone())),
-                    (p2, Term::Negative(set2.clone())),
+                    (package, Term::Positive(versions)),
+                    (p2, Term::Negative(set2)),
                 ])
             },
-            kind: Kind::FromDependencyOf(package, versions, p2, set2),
+            kind: Kind::FromDependencyOf(package, p2),
             contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
-    pub(crate) fn as_dependency(&self) -> Option<(Id<P>, Id<P>, &VS)> {
+    fn dependency_terms(&self, p1: Id<P>, p2: Id<P>) -> (&VS, Option<&VS>) {
+        let mut terms = self.package_terms.iter();
+        let versions = match terms.next() {
+            Some((term_package, Term::Positive(versions))) if *term_package == p1 => versions,
+            _ => panic!("dependency incompatibility must start with its positive term"),
+        };
+        let dependency_versions = match terms.next() {
+            None => None,
+            Some((term_package, Term::Negative(versions))) if *term_package == p2 => Some(versions),
+            _ => panic!("dependency incompatibility must end with its negative term"),
+        };
+        assert!(
+            terms.next().is_none(),
+            "dependency incompatibility must contain at most two terms"
+        );
+        (versions, dependency_versions)
+    }
+
+    /// Returns the version sets for a dependency incompatibility.
+    ///
+    /// Returns `None` if this is not a dependency incompatibility. The dependency version set in
+    /// the returned pair is `None` when it is empty because empty dependencies are stored without a
+    /// negative term.
+    pub fn dependency_version_sets(&self) -> Option<(&VS, Option<&VS>)> {
         match &self.kind {
-            Kind::FromDependencyOf(p1, _, p2, range) => Some((*p1, *p2, range)),
+            Kind::FromDependencyOf(p1, p2) => Some(self.dependency_terms(*p1, *p2)),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn as_dependency(&self) -> Option<(Id<P>, Id<P>, Option<&VS>)> {
+        match &self.kind {
+            Kind::FromDependencyOf(p1, p2) => {
+                let (_, dependency_range) = self.dependency_terms(*p1, *p2);
+                Some((*p1, *p2, dependency_range))
+            }
             _ => None,
         }
     }
@@ -207,10 +240,11 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     /// is the common dependant in the two incompatibilities expressing dependencies.
     pub(crate) fn merge_dependents(&self, other: &Self) -> Option<Self> {
         // It is almost certainly a bug to call this method without checking that self is a dependency
-        debug_assert!(self.as_dependency().is_some());
+        let dependency = self.as_dependency();
+        debug_assert!(dependency.is_some());
         // Check that both incompatibilities are of the shape p1 depends on p2,
         // with the same p1 and p2.
-        let (p1, p2, _) = self.as_dependency()?;
+        let (p1, p2, _) = dependency?;
         let (other_p1, other_p2, _) = other.as_dependency()?;
         if (p1, p2) != (other_p1, other_p2) {
             return None;
@@ -361,12 +395,14 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 package_store[package].clone(),
                 set.clone(),
             )),
-            Kind::FromDependencyOf(package, set, dep_package, dep_set) => {
+            Kind::FromDependencyOf(package, dep_package) => {
+                let (package_versions, dependency_versions) =
+                    store[self_id].dependency_terms(package, dep_package);
                 DerivationTree::External(External::FromDependencyOf(
                     package_store[package].clone(),
-                    set.clone(),
+                    package_versions.clone(),
                     package_store[dep_package].clone(),
-                    dep_set.clone(),
+                    dependency_versions.cloned().unwrap_or_else(VS::empty),
                 ))
             }
             Kind::Custom(package, set, metadata) => DerivationTree::External(External::Custom(
@@ -452,11 +488,51 @@ pub(crate) mod tests {
     use proptest::prelude::*;
     use std::cmp::Reverse;
     use std::collections::BTreeMap;
+    use std::fmt::{self, Formatter};
 
     use super::*;
     use crate::internal::State;
     use crate::term::tests::strategy as term_strat;
     use crate::{OfflineDependencyProvider, Ranges};
+
+    #[derive(Debug, Eq, Hash, PartialEq)]
+    struct PanicOnCloneRanges(Ranges<usize>);
+
+    impl Clone for PanicOnCloneRanges {
+        fn clone(&self) -> Self {
+            panic!("version set was cloned")
+        }
+    }
+
+    impl Display for PanicOnCloneRanges {
+        fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+            Display::fmt(&self.0, f)
+        }
+    }
+
+    impl VersionSet for PanicOnCloneRanges {
+        type V = usize;
+
+        fn empty() -> Self {
+            Self(Ranges::empty())
+        }
+
+        fn singleton(v: Self::V) -> Self {
+            Self(Ranges::singleton(v))
+        }
+
+        fn complement(&self) -> Self {
+            Self(self.0.complement())
+        }
+
+        fn intersection(&self, other: &Self) -> Self {
+            Self(self.0.intersection(&other.0))
+        }
+
+        fn contains(&self, v: &Self::V) -> bool {
+            self.0.contains(v)
+        }
+    }
 
     #[test]
     fn contradiction_cache_tracks_backtrack_generations() {
@@ -502,13 +578,13 @@ pub(crate) mod tests {
             let p3 = package_store.alloc("p3");
             let i1 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([(p1, t1.clone()), (p2, t2.negate())]),
-                kind: Kind::<_, _, String>::FromDependencyOf(p1, Ranges::full(), p2, Ranges::full()),
+                kind: Kind::<_, _, String>::FromDependencyOf(p1, p2),
                 contradiction_cache: ContradictionCache::not_contradicted(),
             });
 
             let i2 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([(p2, t2), (p3, t3.clone())]),
-                kind: Kind::<_, _, String>::FromDependencyOf(p2, Ranges::full(), p3, Ranges::full()),
+                kind: Kind::<_, _, String>::FromDependencyOf(p2, p3),
                 contradiction_cache: ContradictionCache::not_contradicted(),
             });
 
@@ -520,6 +596,134 @@ pub(crate) mod tests {
             assert_eq!(i_resolution.package_terms.iter().map(|(&k, v)|(k, v.clone())).collect::<Map<_, _>>(), i3);
         }
 
+    }
+
+    #[test]
+    fn from_dependency_does_not_clone_version_sets() {
+        let mut package_store = HashArena::new();
+        let package = package_store.alloc("package".to_string());
+        let dependency = package_store.alloc("dependency".to_string());
+
+        for dependency_versions in [
+            PanicOnCloneRanges(Ranges::singleton(2usize)),
+            PanicOnCloneRanges(Ranges::empty()),
+        ] {
+            let _: Incompatibility<String, PanicOnCloneRanges, String> =
+                Incompatibility::from_dependency(
+                    package,
+                    PanicOnCloneRanges(Ranges::singleton(1usize)),
+                    (dependency, dependency_versions),
+                );
+        }
+    }
+
+    fn assert_dependency_tree(
+        package_store: &HashArena<String>,
+        incompatibility: Incompatibility<String, Ranges<usize>, String>,
+        expected_versions: &Ranges<usize>,
+        expected_dependency: &str,
+        expected_dependency_versions: &Ranges<usize>,
+    ) {
+        let (versions, dependency_versions) = incompatibility
+            .dependency_version_sets()
+            .expect("expected a dependency incompatibility");
+        assert_eq!(versions, expected_versions);
+        match dependency_versions {
+            Some(dependency_versions) => {
+                assert_eq!(dependency_versions, expected_dependency_versions);
+            }
+            None => assert_eq!(expected_dependency_versions, &Ranges::empty()),
+        }
+
+        let mut store = Arena::new();
+        let id = store.alloc(incompatibility);
+        let tree = Incompatibility::build_derivation_tree(
+            id,
+            &Set::default(),
+            &store,
+            package_store,
+            &Map::default(),
+        );
+        let DerivationTree::External(External::FromDependencyOf(
+            actual_package,
+            actual_versions,
+            actual_dependency,
+            actual_dependency_versions,
+        )) = tree
+        else {
+            panic!("expected a dependency external")
+        };
+        assert_eq!(actual_package, "package");
+        assert_eq!(&actual_versions, expected_versions);
+        assert_eq!(actual_dependency, expected_dependency);
+        assert_eq!(&actual_dependency_versions, expected_dependency_versions);
+    }
+
+    #[test]
+    fn dependency_derivation_trees_reconstruct_ranges() {
+        let mut package_store = HashArena::new();
+        let package = package_store.alloc("package".to_string());
+        let dependency = package_store.alloc("dependency".to_string());
+        let versions = Ranges::between(1usize, 4usize);
+        let other_versions = Ranges::singleton(4usize);
+        let dependency_versions = Ranges::between(7usize, 10usize);
+
+        assert_dependency_tree(
+            &package_store,
+            Incompatibility::from_dependency(
+                package,
+                versions.clone(),
+                (dependency, dependency_versions.clone()),
+            ),
+            &versions,
+            "dependency",
+            &dependency_versions,
+        );
+
+        let empty = Ranges::empty();
+        assert_dependency_tree(
+            &package_store,
+            Incompatibility::from_dependency(
+                package,
+                versions.clone(),
+                (dependency, empty.clone()),
+            ),
+            &versions,
+            "dependency",
+            &empty,
+        );
+
+        assert_dependency_tree(
+            &package_store,
+            Incompatibility::from_dependency(
+                package,
+                versions.clone(),
+                (package, dependency_versions.clone()),
+            ),
+            &versions,
+            "package",
+            &dependency_versions,
+        );
+
+        let first: Incompatibility<String, Ranges<usize>, String> =
+            Incompatibility::from_dependency(
+                package,
+                versions.clone(),
+                (dependency, dependency_versions.clone()),
+            );
+        let second = Incompatibility::from_dependency(
+            package,
+            other_versions.clone(),
+            (dependency, dependency_versions.clone()),
+        );
+        let merged = first.merge_dependents(&second).unwrap();
+        assert_dependency_tree(
+            &package_store,
+            merged,
+            &versions.union(&other_versions),
+            "dependency",
+            &dependency_versions,
+        );
     }
 
     /// Check that multiple self-dependencies are supported.
