@@ -90,7 +90,7 @@ fn backtracking_ranges(c: &mut Criterion, package_count: u32, version_count: u32
 
 /// A large dependency tree representing the common case where every package resolves on the first
 /// attempt and PubGrub never needs to backtrack.
-fn large_project_no_backtracking(c: &mut Criterion, package_count: u32) {
+fn no_backtracking(c: &mut Criterion, package_count: u32) {
     let mut dependency_provider = OfflineDependencyProvider::<u32, Ranges<u32>>::new();
 
     for package in 0..package_count {
@@ -101,7 +101,7 @@ fn large_project_no_backtracking(c: &mut Criterion, package_count: u32) {
         dependency_provider.add_dependencies(package, 0u32, dependencies);
     }
 
-    c.bench_function("large_project_no_backtracking", |b| {
+    c.bench_function("no_backtracking", |b| {
         b.iter(|| {
             let _ = pubgrub::resolve(&dependency_provider, 0u32, 0u32);
         })
@@ -112,7 +112,7 @@ fn bench_group(c: &mut Criterion) {
     backtracking_singletons(c, 100, 500);
     backtracking_disjoint_versions(c, 300, 200);
     backtracking_ranges(c, 5, 200);
-    large_project_no_backtracking(c, 1_000);
+    no_backtracking(c, 1_000);
 }
 
 criterion_group!(benches, bench_group);

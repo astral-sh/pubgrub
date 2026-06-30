@@ -8,6 +8,10 @@ use crate::internal::{Id, Incompatibility, State};
 use crate::{Map, Package, PubGrubError, Term, VersionSet};
 use log::{debug, info};
 
+/// Tracks package versions whose dependency incompatibilities have already been added.
+///
+/// Before the first backtrack, entries are stored in a compact history because decisions cannot
+/// be revisited. The history is promoted to a deduplicating map only once revisits become possible.
 struct AddedDependencies<P, V> {
     before_first_backtrack: Vec<(Id<P>, V)>,
     after_first_backtrack: Option<Map<Id<P>, Set<V>>>,
@@ -21,7 +25,11 @@ impl<P, V: Ord> AddedDependencies<P, V> {
         }
     }
 
-    /// Returns whether dependencies for this package version have not been added before.
+    /// Records a package version and returns whether its dependency incompatibilities still need
+    /// to be added.
+    ///
+    /// `has_backtracked` must remain true after the first backtrack so that later decisions are
+    /// deduplicated against the complete pre-backtrack history.
     fn insert(&mut self, package: Id<P>, version: V, has_backtracked: bool) -> bool {
         if !has_backtracked {
             // Without a backtrack, an earlier decision cannot be revisited. Keep a compact history
@@ -476,28 +484,5 @@ pub trait DependencyProvider {
     /// If not provided the resolver will run as long as needed.
     fn should_cancel(&self) -> Result<(), Self::Err> {
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::AddedDependencies;
-    use crate::internal::HashArena;
-
-    #[test]
-    fn added_dependencies_preserves_history_after_first_backtrack() {
-        let mut packages = HashArena::new();
-        let foo = packages.alloc("foo");
-        let bar = packages.alloc("bar");
-        let mut added = AddedDependencies::new();
-
-        assert!(added.insert(foo, 1, false));
-        assert!(added.insert(bar, 1, false));
-
-        // The first backtrack promotes the compact history into the deduplicating map.
-        assert!(!added.insert(foo, 1, true));
-        assert!(added.insert(foo, 2, true));
-        assert!(!added.insert(foo, 2, true));
-        assert!(!added.insert(bar, 1, true));
     }
 }

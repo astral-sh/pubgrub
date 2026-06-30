@@ -228,6 +228,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         );
     }
 
+    /// Returns whether at least one backtrack generation has completed.
     pub(crate) fn has_backtracked(&self) -> bool {
         self.last_valid_decision_levels.len() > 1
     }
