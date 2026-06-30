@@ -11,6 +11,7 @@ use crate::internal::{
     Arena, DecisionLevel, HashArena, Id, IncompDpId, IncompId, Incompatibility, PartialSolution,
     Relation, SatisfierSearch, SmallVec,
 };
+use crate::term::Relation as TermRelation;
 use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, Package, Term, VersionSet};
 
 #[derive(Clone)]
@@ -165,6 +166,52 @@ impl<DP: DependencyProvider> State<DP> {
                 Relation::Satisfied
             )
         })
+    }
+
+    /// Return whether selecting any version in the given set for an undecided package would
+    /// immediately conflict with incompatibilities already known to this state.
+    ///
+    /// This is a conservative range-level variant of
+    /// Self::version_conflicts_with_partial_solution: it only unions ranges from existing
+    /// incompatibilities whose other terms are already satisfied.
+    pub fn range_conflicts_with_partial_solution(
+        &self,
+        package: Id<DP::P>,
+        versions: DP::VS,
+    ) -> bool {
+        let Some(incompatibilities) = self.incompatibilities.get(&package) else {
+            return false;
+        };
+
+        let mut conflicting = DP::VS::empty();
+        for &incompatibility in incompatibilities {
+            let incompatibility = &self.incompatibility_store[incompatibility];
+            let Some(term) = incompatibility.get(package) else {
+                continue;
+            };
+            let other_terms_satisfied = incompatibility.iter().all(|(current_package, term)| {
+                current_package == package
+                    || self
+                        .partial_solution
+                        .term_intersection_for_package(current_package)
+                        .is_some_and(|current| {
+                            matches!(term.relation_with(current), TermRelation::Satisfied)
+                        })
+            });
+            if !other_terms_satisfied {
+                continue;
+            }
+
+            let conflict = match term {
+                Term::Positive(versions) => versions.clone(),
+                Term::Negative(versions) => versions.complement(),
+            };
+            conflicting = conflicting.union(&conflict);
+            if versions.subset_of(&conflicting) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Add a single custom incompatibility that requires that the base package and the proxy
@@ -535,10 +582,20 @@ mod dependency_merge_tests {
             2,
             [("dependency", Ranges::singleton(1u32))],
         );
+        state.add_incompatibility_from_dependencies(
+            package,
+            3,
+            [("dependency", Ranges::singleton(1u32))],
+        );
         state.partial_solution.add_decision(dependency, 2);
 
         assert!(state.version_conflicts_with_partial_solution(package, 2));
         assert!(!state.version_conflicts_with_partial_solution(package, 1));
+        assert!(state.range_conflicts_with_partial_solution(package, Ranges::singleton(2u32)));
+        assert!(state.range_conflicts_with_partial_solution(
+            package,
+            Ranges::singleton(2u32).union(&Ranges::singleton(3u32)),
+        ));
     }
 
     #[test]
