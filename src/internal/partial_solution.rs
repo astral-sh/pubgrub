@@ -228,6 +228,11 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         );
     }
 
+    /// Returns whether at least one backtrack generation has completed.
+    pub(crate) fn has_backtracked(&self) -> bool {
+        self.last_valid_decision_levels.len() > 1
+    }
+
     pub(crate) fn display<'a>(&'a self, package_store: &'a HashArena<DP::P>) -> impl Display + 'a {
         struct PSDisplay<'a, DP: DependencyProvider>(&'a PartialSolution<DP>, &'a HashArena<DP::P>);
 
@@ -529,7 +534,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         new_incompatibilities: std::ops::Range<IncompId<DP::P, DP::VS, DP::M>>,
         store: &Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
     ) -> Option<IncompId<DP::P, DP::VS, DP::M>> {
-        if self.last_valid_decision_levels.len() == 1 {
+        if !self.has_backtracked() {
             // Fast path: Nothing has yet gone wrong during this resolution. This call is unlikely to be the first problem.
             // So let's live with a little bit of risk and add the decision without checking the dependencies.
             // The worst that can happen is we will have to do a full backtrack which only removes this one decision.
