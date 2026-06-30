@@ -41,7 +41,7 @@ impl<P, V: Ord> AddedDependencies<P, V> {
         self.after_first_backtrack
             .get_or_insert_with(|| {
                 let mut added = Map::<Id<P>, Set<V>>::default();
-                for (package, version) in self.before_first_backtrack.drain(..) {
+                for (package, version) in std::mem::take(&mut self.before_first_backtrack) {
                     added.entry(package).or_default().insert(version);
                 }
                 added
