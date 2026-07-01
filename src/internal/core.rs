@@ -11,7 +11,6 @@ use crate::internal::{
     Arena, DecisionLevel, HashArena, Id, IncompDpId, IncompId, Incompatibility, PartialSolution,
     Relation, SatisfierSearch, SmallVec,
 };
-use crate::term::Relation as TermRelation;
 use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, Package, Term, VersionSet};
 
 #[derive(Clone)]
@@ -139,8 +138,9 @@ impl<DP: DependencyProvider> State<DP> {
     pub fn version_conflicts_with_partial_solution(
         &self,
         package: Id<DP::P>,
-        version: DP::V,
+        version: impl std::borrow::Borrow<DP::V>,
     ) -> bool {
+        let version = version.borrow();
         let Some(incompatibilities) = self.incompatibilities.get(&package) else {
             return false;
         };
@@ -148,32 +148,36 @@ impl<DP: DependencyProvider> State<DP> {
         let Some(term) = self.partial_solution.term_intersection_for_package(package) else {
             return false;
         };
-        if !term.contains(&version) {
+        if !term.contains(version) {
             return true;
         }
 
-        let decision = Term::<DP::VS>::exact(version);
         incompatibilities.iter().any(|&incompatibility| {
-            matches!(
-                self.incompatibility_store[incompatibility].relation(|current_package| {
-                    if current_package == package {
-                        Some(&decision)
-                    } else {
-                        self.partial_solution
+            let incompatibility = &self.incompatibility_store[incompatibility];
+            incompatibility
+                .get(package)
+                .is_some_and(|term| term.contains(version))
+                && incompatibility.iter().all(|(current_package, term)| {
+                    current_package == package
+                        || self
+                            .partial_solution
                             .term_intersection_for_package(current_package)
-                    }
-                }),
-                Relation::Satisfied
-            )
+                            .is_some_and(|current| {
+                                matches!(
+                                    term.relation_with(current),
+                                    crate::term::Relation::Satisfied
+                                )
+                            })
+                })
         })
     }
 
     /// Return whether selecting any version in the given set for an undecided package would
     /// immediately conflict with incompatibilities already known to this state.
     ///
-    /// This is a conservative range-level variant of
-    /// Self::version_conflicts_with_partial_solution: it only unions ranges from existing
-    /// incompatibilities whose other terms are already satisfied.
+    /// This is the range-level variant of Self::version_conflicts_with_partial_solution. For a
+    /// non-empty set of versions, it is equivalent to checking every version individually, but it
+    /// unions the conflicting terms and uses version-set operations instead.
     pub fn range_conflicts_with_partial_solution(
         &self,
         package: Id<DP::P>,
@@ -195,7 +199,10 @@ impl<DP: DependencyProvider> State<DP> {
                         .partial_solution
                         .term_intersection_for_package(current_package)
                         .is_some_and(|current| {
-                            matches!(term.relation_with(current), TermRelation::Satisfied)
+                            matches!(
+                                term.relation_with(current),
+                                crate::term::Relation::Satisfied
+                            )
                         })
             });
             if !other_terms_satisfied {
@@ -211,6 +218,7 @@ impl<DP: DependencyProvider> State<DP> {
                 return true;
             }
         }
+
         false
     }
 
@@ -590,12 +598,27 @@ mod dependency_merge_tests {
         state.partial_solution.add_decision(dependency, 2);
 
         assert!(state.version_conflicts_with_partial_solution(package, 2));
-        assert!(!state.version_conflicts_with_partial_solution(package, 1));
+        assert!(!state.version_conflicts_with_partial_solution(package, &1));
         assert!(state.range_conflicts_with_partial_solution(package, Ranges::singleton(2u32)));
         assert!(state.range_conflicts_with_partial_solution(
             package,
             Ranges::singleton(2u32).union(&Ranges::singleton(3u32)),
         ));
+        assert!(!state.range_conflicts_with_partial_solution(
+            package,
+            Ranges::singleton(1u32).union(&Ranges::singleton(2u32)),
+        ));
+        for versions in [[1].as_slice(), &[2], &[3], &[2, 3], &[1, 2]] {
+            let range = versions.iter().fold(Ranges::empty(), |range, &version| {
+                range.union(&Ranges::singleton(version))
+            });
+            assert_eq!(
+                state.range_conflicts_with_partial_solution(package, range),
+                versions
+                    .iter()
+                    .all(|version| state.version_conflicts_with_partial_solution(package, version))
+            );
+        }
     }
 
     #[test]
