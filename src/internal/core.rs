@@ -476,9 +476,26 @@ mod dependency_merge_tests {
     use std::fmt::{self, Display};
     use std::hash::{Hash, Hasher};
 
-    use crate::{OfflineDependencyProvider, Ranges, VersionSet};
+    use crate::{Incompatibility, OfflineDependencyProvider, Ranges, Term, VersionSet};
 
     use super::State;
+
+    #[test]
+    fn positive_incompatibility_after_decision_does_not_derive() {
+        let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
+            State::init("root", 0);
+        let root = state.root_package;
+        state.unit_propagation(root).unwrap();
+        state.partial_solution.add_decision(root, 0);
+
+        state.add_incompatibility(Incompatibility::custom_term(
+            root,
+            Term::Positive(CollidingRanges::singleton(0).with_selection(true)),
+            "root is unavailable".to_string(),
+        ));
+
+        assert!(state.unit_propagation(root).is_err());
+    }
 
     #[test]
     fn does_not_merge_dependencies_with_distinct_selection_metadata() {

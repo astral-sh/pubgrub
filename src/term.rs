@@ -192,16 +192,7 @@ impl<VS: VersionSet> Term<VS> {
     pub(crate) fn relation_with(&self, other_terms_intersection: &Self) -> Relation {
         match (self, other_terms_intersection) {
             (Self::Positive(range), Self::Positive(other)) => match other.relation(range) {
-                SetRelation::Subset => {
-                    // A logically redundant constraint can still add candidate-selection
-                    // metadata. Intersect and propagate the constraint if it changes the current
-                    // selection behavior.
-                    if !other.selection_eq(&other.intersection(range)) {
-                        Relation::Inconclusive
-                    } else {
-                        Relation::Satisfied
-                    }
-                }
+                SetRelation::Subset => Relation::Satisfied,
                 SetRelation::Disjoint => Relation::Contradicted,
                 SetRelation::Overlapping => Relation::Inconclusive,
             },
@@ -413,13 +404,13 @@ pub mod tests {
     }
 
     #[test]
-    fn equal_positive_ranges_propagate_new_selection_metadata() {
+    fn equal_positive_ranges_ignore_selection_metadata() {
         let plain = SelectionRanges::singleton(1);
         let selected = plain.clone().with_selection();
 
         assert!(matches!(
             Term::Positive(selected.clone()).relation_with(&Term::Positive(plain)),
-            Relation::Inconclusive
+            Relation::Satisfied
         ));
         assert!(matches!(
             Term::Positive(selected).relation_with(&Term::Positive(
@@ -430,7 +421,7 @@ pub mod tests {
     }
 
     #[test]
-    fn strict_positive_subset_propagates_broader_selection_metadata() {
+    fn strict_positive_subset_ignores_broader_selection_metadata() {
         let active = SelectionRanges::singleton(1);
         let requirement = SelectionRanges {
             versions: Ranges::full(),
@@ -439,7 +430,7 @@ pub mod tests {
 
         assert!(matches!(
             Term::Positive(requirement).relation_with(&Term::Positive(active)),
-            Relation::Inconclusive
+            Relation::Satisfied
         ));
     }
 
