@@ -533,27 +533,24 @@ mod dependency_merge_tests {
     }
 
     #[derive(Clone, Debug)]
-    struct CollidingRanges {
-        versions: Ranges<u32>,
-        selected: bool,
-    }
+    struct CollidingRanges(Ranges<u32>, bool);
 
     impl CollidingRanges {
         fn with_selection(mut self, selected: bool) -> Self {
-            self.selected = selected;
+            self.1 = selected;
             self
         }
     }
 
     impl Display for CollidingRanges {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            Display::fmt(&self.versions, f)
+            Display::fmt(&self.0, f)
         }
     }
 
     impl PartialEq for CollidingRanges {
         fn eq(&self, other: &Self) -> bool {
-            self.versions == other.versions
+            self.0 == other.0
         }
     }
 
@@ -569,39 +566,27 @@ mod dependency_merge_tests {
         type V = u32;
 
         fn empty() -> Self {
-            Self {
-                versions: Ranges::empty(),
-                selected: false,
-            }
+            Self(Ranges::empty(), false)
         }
 
         fn singleton(v: Self::V) -> Self {
-            Self {
-                versions: Ranges::singleton(v),
-                selected: false,
-            }
+            Self(Ranges::singleton(v), false)
         }
 
         fn complement(&self) -> Self {
-            Self {
-                versions: self.versions.complement(),
-                selected: false,
-            }
+            Self(self.0.complement(), self.1)
         }
 
         fn intersection(&self, other: &Self) -> Self {
-            Self {
-                versions: self.versions.intersection(&other.versions),
-                selected: self.selected || other.selected,
-            }
+            Self(self.0.intersection(&other.0), self.1 || other.1)
         }
 
         fn contains(&self, v: &Self::V) -> bool {
-            self.versions.contains(v)
+            self.0.contains(v)
         }
 
         fn selection_eq(&self, other: &Self) -> bool {
-            self == other && self.selected == other.selected
+            self == other && self.1 == other.1
         }
     }
 }

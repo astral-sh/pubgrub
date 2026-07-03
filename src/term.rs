@@ -54,17 +54,6 @@ impl<VS: VersionSet> Term<VS> {
         }
     }
 
-    /// Whether two terms have the same polarity and candidate-selection behavior.
-    pub(crate) fn selection_eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Positive(left), Self::Positive(right))
-            | (Self::Negative(left), Self::Negative(right)) => left.selection_eq(right),
-            (Self::Positive(_), Self::Negative(_)) | (Self::Negative(_), Self::Positive(_)) => {
-                false
-            }
-        }
-    }
-
     /// Negate a term.
     /// Evaluation of a negated term always returns
     /// the opposite of the evaluation of the original one.
@@ -90,16 +79,6 @@ impl<VS: VersionSet> Term<VS> {
         match self {
             Self::Positive(set) => set,
             Self::Negative(set) => panic!("Negative term cannot unwrap positive set: {set:?}"),
-        }
-    }
-
-    /// Unwrap the set contained in a negative term.
-    ///
-    /// Panics if used on a positive set.
-    pub(crate) fn unwrap_negative(&self) -> &VS {
-        match self {
-            Self::Negative(set) => set,
-            Self::Positive(set) => panic!("Positive term cannot unwrap negative set: {set:?}"),
         }
     }
 }

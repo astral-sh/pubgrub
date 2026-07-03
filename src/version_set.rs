@@ -62,9 +62,10 @@ pub trait VersionSet: Debug + Display + Clone + Eq + Hash {
 
     /// Whether two sets have the same version membership and candidate-selection behavior.
     ///
-    /// PubGrub uses this method when deciding whether dependency constraints are interchangeable.
-    /// The default assumes candidate selection depends only on version membership. Implementations
-    /// that carry additional selection metadata must override it.
+    /// PubGrub uses this method when deciding whether dependency constraints can be merged without
+    /// changing the candidates chosen by the dependency provider. The default assumes candidate
+    /// selection depends only on version membership. Implementations that carry additional
+    /// selection metadata must override it.
     ///
     /// This method must be an equivalence relation, and returning `true` requires `self == other`.
     /// It may return `false` for sets that compare equal when their selection metadata differs.
