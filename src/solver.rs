@@ -463,7 +463,10 @@ pub trait DependencyProvider {
     /// Once the resolver has found the highest `Priority` package from all potential valid
     /// packages, it needs to know what version of that package to use. The most common pattern
     /// is to select the largest version that the range contains. The range may carry additional
-    /// candidate-selection metadata that does not affect [`VersionSet::contains`].
+    /// candidate-selection metadata that does not affect [`VersionSet::contains`]. This metadata
+    /// may change which contained version is returned, but it must not change whether a candidate
+    /// exists: ranges with equal version membership must either both return `Some` or both return
+    /// `None`.
     fn choose_version(
         &self,
         package: &Self::P,

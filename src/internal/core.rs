@@ -537,6 +537,30 @@ mod dependency_merge_tests {
     }
 
     #[test]
+    fn merges_structurally_distinct_selection_equivalent_dependencies() {
+        let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
+            State::init("root", 0);
+        let package = state.package_store.alloc("package");
+        let selected = CollidingRanges::singleton(1).with_selection(true);
+        let alternate = selected.clone().with_representation(true);
+        let constraint = CollidingRanges::full();
+
+        assert!(selected.selection_eq(&alternate));
+        assert!(
+            selected
+                .intersection(&constraint)
+                .selection_eq(&alternate.intersection(&constraint))
+        );
+
+        state.add_incompatibility_from_dependencies(package, 1, [("dependency", selected)]);
+        state.add_incompatibility_from_dependencies(package, 2, [("dependency", alternate)]);
+
+        let dependency = state.package_store.alloc("dependency");
+        assert_eq!(state.incompatibilities[&package].len(), 1);
+        assert_eq!(state.incompatibilities[&dependency].len(), 1);
+    }
+
+    #[test]
     fn merge_dependencies_with_hash_collisions() {
         let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
             State::init("root", 0);
@@ -565,11 +589,17 @@ mod dependency_merge_tests {
     struct CollidingRanges {
         versions: Ranges<u32>,
         selected: bool,
+        representation: bool,
     }
 
     impl CollidingRanges {
         fn with_selection(mut self, selected: bool) -> Self {
             self.selected = selected;
+            self
+        }
+
+        fn with_representation(mut self, representation: bool) -> Self {
+            self.representation = representation;
             self
         }
     }
@@ -601,6 +631,7 @@ mod dependency_merge_tests {
             Self {
                 versions: Ranges::empty(),
                 selected: false,
+                representation: false,
             }
         }
 
@@ -608,6 +639,7 @@ mod dependency_merge_tests {
             Self {
                 versions: Ranges::singleton(v),
                 selected: false,
+                representation: false,
             }
         }
 
@@ -615,6 +647,7 @@ mod dependency_merge_tests {
             Self {
                 versions: self.versions.complement(),
                 selected: self.selected,
+                representation: self.representation,
             }
         }
 
@@ -622,6 +655,7 @@ mod dependency_merge_tests {
             Self {
                 versions: self.versions.intersection(&other.versions),
                 selected: self.selected || other.selected,
+                representation: self.representation,
             }
         }
 
