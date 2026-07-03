@@ -103,7 +103,7 @@ impl<VS: VersionSet> Term<VS> {
         match (self, other) {
             (Self::Positive(r1), Self::Positive(r2)) => Self::Positive(r1.intersection(r2)),
             (Self::Positive(p), Self::Negative(n)) | (Self::Negative(n), Self::Positive(p)) => {
-                Self::Positive(n.complement().intersection(p))
+                Self::Positive(p.difference(n))
             }
             (Self::Negative(r1), Self::Negative(r2)) => Self::Negative(r1.union(r2)),
         }
@@ -131,7 +131,7 @@ impl<VS: VersionSet> Term<VS> {
         match (self, other) {
             (Self::Positive(r1), Self::Positive(r2)) => Self::Positive(r1.union(r2)),
             (Self::Positive(p), Self::Negative(n)) | (Self::Negative(n), Self::Positive(p)) => {
-                Self::Negative(p.complement().intersection(n))
+                Self::Negative(n.difference(p))
             }
             (Self::Negative(r1), Self::Negative(r2)) => Self::Negative(r1.intersection(r2)),
         }
@@ -269,6 +269,79 @@ pub mod tests {
         }
     }
 
+    /// A version set with directional metadata that is accumulated by requirements but not by
+    /// exclusions.
+    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+    struct DirectionalRanges {
+        versions: Ranges<u32>,
+        marked: bool,
+    }
+
+    impl DirectionalRanges {
+        fn new(versions: Ranges<u32>, marked: bool) -> Self {
+            Self { versions, marked }
+        }
+    }
+
+    impl Display for DirectionalRanges {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.versions.fmt(f)
+        }
+    }
+
+    impl VersionSet for DirectionalRanges {
+        type V = u32;
+
+        fn empty() -> Self {
+            Self::new(Ranges::empty(), false)
+        }
+
+        fn singleton(version: Self::V) -> Self {
+            Self::new(Ranges::singleton(version), false)
+        }
+
+        fn complement(&self) -> Self {
+            Self::new(self.versions.complement(), self.marked)
+        }
+
+        fn intersection(&self, other: &Self) -> Self {
+            Self::new(
+                self.versions.intersection(&other.versions),
+                self.marked || other.marked,
+            )
+        }
+
+        fn difference(&self, other: &Self) -> Self {
+            Self::new(
+                self.versions.intersection(&other.versions.complement()),
+                self.marked,
+            )
+        }
+
+        fn contains(&self, version: &Self::V) -> bool {
+            self.versions.contains(version)
+        }
+
+        fn union(&self, other: &Self) -> Self {
+            Self::new(
+                self.versions.union(&other.versions),
+                self.marked || other.marked,
+            )
+        }
+
+        fn is_disjoint(&self, other: &Self) -> bool {
+            self.versions.is_disjoint(&other.versions)
+        }
+
+        fn subset_of(&self, other: &Self) -> bool {
+            self.versions.subset_of(&other.versions)
+        }
+
+        fn relation(&self, other: &Self) -> SetRelation {
+            self.versions.relation(&other.versions)
+        }
+    }
+
     impl VersionSet for NoDisjointRanges {
         type V = u32;
 
@@ -312,6 +385,28 @@ pub mod tests {
             term.relation_with(&Term::empty()),
             Relation::Satisfied
         ));
+    }
+
+    #[test]
+    fn mixed_terms_use_directional_difference() {
+        let requirement = DirectionalRanges::new(Ranges::between(1_u32, 5_u32), false);
+        let marked_exclusion = DirectionalRanges::new(Ranges::singleton(3_u32), true);
+        let remaining = DirectionalRanges::new(
+            requirement
+                .versions
+                .intersection(&marked_exclusion.versions.complement()),
+            false,
+        );
+
+        assert_eq!(
+            Term::Positive(requirement.clone())
+                .intersection(&Term::Negative(marked_exclusion.clone())),
+            Term::Positive(remaining.clone())
+        );
+        assert_eq!(
+            Term::Negative(requirement).union(&Term::Positive(marked_exclusion)),
+            Term::Negative(remaining)
+        );
     }
 
     #[test]
