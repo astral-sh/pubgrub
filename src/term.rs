@@ -208,16 +208,7 @@ impl<VS: VersionSet> Term<VS> {
                     Relation::Satisfied
                 } else {
                     match other.relation(range) {
-                        SetRelation::Subset => {
-                            // Although the active versions contradict this negative term, its
-                            // inverse can still add candidate-selection metadata to the partial
-                            // solution.
-                            if !other.selection_eq(&other.intersection(range)) {
-                                Relation::Inconclusive
-                            } else {
-                                Relation::Contradicted
-                            }
-                        }
+                        SetRelation::Subset => Relation::Contradicted,
                         SetRelation::Disjoint => Relation::Satisfied,
                         SetRelation::Overlapping => Relation::Inconclusive,
                     }
@@ -435,13 +426,13 @@ pub mod tests {
     }
 
     #[test]
-    fn equal_negative_range_propagates_new_selection_metadata() {
+    fn equal_negative_ranges_ignore_selection_metadata() {
         let plain = SelectionRanges::singleton(1);
         let selected = plain.clone().with_selection();
 
         assert!(matches!(
             Term::Negative(selected.clone()).relation_with(&Term::Positive(plain)),
-            Relation::Inconclusive
+            Relation::Contradicted
         ));
         assert!(matches!(
             Term::Negative(SelectionRanges::singleton(1)).relation_with(&Term::Positive(selected)),
@@ -450,7 +441,7 @@ pub mod tests {
     }
 
     #[test]
-    fn strict_negative_subset_propagates_broader_selection_metadata() {
+    fn strict_negative_subset_ignores_broader_selection_metadata() {
         let active = SelectionRanges::singleton(1);
         let requirement = SelectionRanges {
             versions: Ranges::full(),
@@ -459,7 +450,7 @@ pub mod tests {
 
         assert!(matches!(
             Term::Negative(requirement).relation_with(&Term::Positive(active)),
-            Relation::Inconclusive
+            Relation::Contradicted
         ));
     }
 

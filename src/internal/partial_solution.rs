@@ -584,15 +584,6 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             .map(|pa| pa.assignments_intersection.term())
     }
 
-    pub(crate) fn is_decided(&self, package: Id<DP::P>) -> bool {
-        self.package_assignments.get(&package).is_some_and(|pa| {
-            matches!(
-                pa.assignments_intersection,
-                AssignmentsIntersection::Decision { .. }
-            )
-        })
-    }
-
     /// Figure out if the satisfier and previous satisfier are of different decision levels.
     #[allow(clippy::type_complexity)]
     pub(crate) fn satisfier_search(

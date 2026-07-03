@@ -228,15 +228,6 @@ impl<DP: DependencyProvider> State<DP> {
                         break;
                     }
                     Relation::AlmostSatisfied(package_almost) => {
-                        // A decision is an exact term, so it can only be inconclusive here when a
-                        // compatible negative dependency term adds candidate-selection metadata.
-                        // That metadata can guide a future decision, but it cannot invalidate one
-                        // that has already been made.
-                        if self.partial_solution.is_decided(package_almost) {
-                            self.partial_solution
-                                .mark_contradicted(&mut self.incompatibility_store[incompat_id]);
-                            continue;
-                        }
                         // Add `package_almost` to the `unit_propagation_buffer` set.
                         // Putting items in `unit_propagation_buffer` more than once waste cycles,
                         // but so does allocating a hash map and hashing each item.
@@ -485,26 +476,9 @@ mod dependency_merge_tests {
     use std::fmt::{self, Display};
     use std::hash::{Hash, Hasher};
 
-    use crate::{Incompatibility, OfflineDependencyProvider, Ranges, Term, VersionSet};
+    use crate::{OfflineDependencyProvider, Ranges, VersionSet};
 
     use super::State;
-
-    #[test]
-    fn positive_incompatibility_after_decision_does_not_derive() {
-        let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
-            State::init("root", 0);
-        let root = state.root_package;
-        state.unit_propagation(root).unwrap();
-        state.partial_solution.add_decision(root, 0);
-
-        state.add_incompatibility(Incompatibility::custom_term(
-            root,
-            Term::Positive(CollidingRanges::singleton(0).with_selection(true)),
-            "root is unavailable".to_string(),
-        ));
-
-        assert!(state.unit_propagation(root).is_err());
-    }
 
     #[test]
     fn selection_metadata_for_decided_dependency_does_not_derive() {
