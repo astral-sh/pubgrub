@@ -9,16 +9,16 @@ use crate::{Ranges, SetRelation};
 ///
 /// See [`Ranges`] for an implementation.
 ///
-/// The methods with default implementations can be overwritten for better performance. Their
-/// version membership must match the default implementation.
+/// The methods with default implementations can be overwritten for better performance, but their
+/// output must be equal to the default implementation.
 ///
 /// # Equality and hashing
 ///
-/// It is important that the `Eq` and `Hash` traits are implemented consistently. For ordinary
-/// version sets, two sets containing the same versions must be equal and produce the same hash. In
-/// particular, you can only derive these traits if version sets are always stored in canonical
-/// representations. Such problems may arise if your implementations of `complement()` and
-/// `intersection()` do not return canonical representations.
+/// It is important that the `Eq` and `Hash` traits are implemented so that if two sets contain the
+/// same versions, they are equal under `Eq` and produce the same hash. In particular, you can only
+/// derive these traits if equality is strictly equivalent to structural equality, i.e. if version
+/// sets are always stored in canonical representations. Such problems may arise if your
+/// implementations of `complement()` and `intersection()` do not return canonical representations.
 ///
 /// For example, `>=1,<4 || >=2,<5` and `>=1,<4 || >=3,<5` are equal, because they can both be
 /// normalized to `>=1,<5`.
@@ -29,9 +29,8 @@ use crate::{Ranges, SetRelation};
 /// other.
 ///
 /// A version set may additionally carry candidate-selection metadata that does not affect
-/// [`Self::contains`]. Such metadata must participate in `Eq` and `Hash` if it affects resolution,
-/// and the implementation must override [`Self::is_disjoint`], [`Self::subset_of`], and
-/// [`Self::relation`] so those methods continue to describe version membership alone.
+/// [`Self::contains`]. Such metadata must not participate in `Eq` or `Hash`; callers that cache
+/// candidate selection should compare it separately.
 pub trait VersionSet: Debug + Display + Clone + Eq + Hash {
     /// Version type associated with the sets manipulated.
     type V: Debug + Display + Clone + Ord;

@@ -256,6 +256,8 @@ impl<VS: VersionSet + Display> Display for Term<VS> {
 
 #[cfg(test)]
 pub mod tests {
+    use std::hash::{Hash, Hasher};
+
     use super::*;
     use proptest::prelude::*;
     use version_ranges::Ranges;
@@ -271,7 +273,7 @@ pub mod tests {
 
     /// A version set with directional metadata that is accumulated by requirements but not by
     /// exclusions.
-    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+    #[derive(Clone, Debug)]
     struct DirectionalRanges {
         versions: Ranges<u32>,
         marked: bool,
@@ -286,6 +288,20 @@ pub mod tests {
     impl Display for DirectionalRanges {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             self.versions.fmt(f)
+        }
+    }
+
+    impl PartialEq for DirectionalRanges {
+        fn eq(&self, other: &Self) -> bool {
+            self.versions == other.versions
+        }
+    }
+
+    impl Eq for DirectionalRanges {}
+
+    impl Hash for DirectionalRanges {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.versions.hash(state);
         }
     }
 
@@ -327,18 +343,6 @@ pub mod tests {
                 self.versions.union(&other.versions),
                 self.marked || other.marked,
             )
-        }
-
-        fn is_disjoint(&self, other: &Self) -> bool {
-            self.versions.is_disjoint(&other.versions)
-        }
-
-        fn subset_of(&self, other: &Self) -> bool {
-            self.versions.subset_of(&other.versions)
-        }
-
-        fn relation(&self, other: &Self) -> SetRelation {
-            self.versions.relation(&other.versions)
         }
     }
 
@@ -398,15 +402,14 @@ pub mod tests {
             false,
         );
 
-        assert_eq!(
-            Term::Positive(requirement.clone())
-                .intersection(&Term::Negative(marked_exclusion.clone())),
-            Term::Positive(remaining.clone())
-        );
-        assert_eq!(
-            Term::Negative(requirement).union(&Term::Positive(marked_exclusion)),
-            Term::Negative(remaining)
-        );
+        let intersection = Term::Positive(requirement.clone())
+            .intersection(&Term::Negative(marked_exclusion.clone()));
+        assert_eq!(intersection, Term::Positive(remaining.clone()));
+        assert!(matches!(intersection, Term::Positive(range) if !range.marked));
+
+        let union = Term::Negative(requirement).union(&Term::Positive(marked_exclusion));
+        assert_eq!(union, Term::Negative(remaining));
+        assert!(matches!(union, Term::Negative(range) if !range.marked));
     }
 
     #[test]
