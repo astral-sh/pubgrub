@@ -258,9 +258,15 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
             return None;
         }
         let dep_term = self.get(p2);
+        let other_dep_term = other.get(p2);
         // The dependency range for p2 must be the same in both case
         // to be able to merge multiple p1 ranges.
-        if dep_term != other.get(p2) {
+        let same_dependency = match (dep_term, other_dep_term) {
+            (Some(dep_term), Some(other_dep_term)) => dep_term.selection_eq(other_dep_term),
+            (None, None) => true,
+            (Some(_), None) | (None, Some(_)) => false,
+        };
+        if !same_dependency {
             return None;
         }
         Some(Self::from_dependency(

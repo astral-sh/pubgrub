@@ -404,6 +404,7 @@ pub trait DependencyProvider {
 
     /// How this provider stores the version requirements for the packages.
     /// The requirements must be able to process the same kind of version as this dependency provider.
+    /// They may carry candidate-selection metadata as described by [`VersionSet::selection_eq`].
     ///
     /// A common choice is [`Ranges`][version_ranges::Ranges].
     type VS: VersionSet<V = Self::V>;
@@ -461,7 +462,8 @@ pub trait DependencyProvider {
 
     /// Once the resolver has found the highest `Priority` package from all potential valid
     /// packages, it needs to know what version of that package to use. The most common pattern
-    /// is to select the largest version that the range contains.
+    /// is to select the largest version that the range contains. The range may carry additional
+    /// candidate-selection metadata that does not affect [`VersionSet::contains`].
     fn choose_version(
         &self,
         package: &Self::P,
