@@ -228,6 +228,15 @@ impl<DP: DependencyProvider> State<DP> {
                         break;
                     }
                     Relation::AlmostSatisfied(package_almost) => {
+                        // A decision is an exact term, so it can only be inconclusive here when a
+                        // compatible negative dependency term adds candidate-selection metadata.
+                        // That metadata can guide a future decision, but it cannot invalidate one
+                        // that has already been made.
+                        if self.partial_solution.is_decided(package_almost) {
+                            self.partial_solution
+                                .mark_contradicted(&mut self.incompatibility_store[incompat_id]);
+                            continue;
+                        }
                         // Add `package_almost` to the `unit_propagation_buffer` set.
                         // Putting items in `unit_propagation_buffer` more than once waste cycles,
                         // but so does allocating a hash map and hashing each item.
@@ -495,6 +504,35 @@ mod dependency_merge_tests {
         ));
 
         assert!(state.unit_propagation(root).is_err());
+    }
+
+    #[test]
+    fn selection_metadata_for_decided_dependency_does_not_derive() {
+        let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
+            State::init("root", 0);
+        let root = state.root_package;
+        state.unit_propagation(root).unwrap();
+        state.partial_solution.add_decision(root, 0);
+
+        state.add_incompatibility_from_dependencies(root, 0, [("b", CollidingRanges::full())]);
+        state.unit_propagation(root).unwrap();
+        let b = state.package_store.alloc("b");
+        state.partial_solution.add_decision(b, 0);
+
+        state.add_incompatibility_from_dependencies(root, 0, [("a", CollidingRanges::full())]);
+        state.unit_propagation(root).unwrap();
+        let a = state.package_store.alloc("a");
+        assert!(
+            state
+                .add_package_version_dependencies(
+                    a,
+                    0,
+                    [("b", CollidingRanges::full().with_selection(true))],
+                )
+                .is_none()
+        );
+
+        state.unit_propagation(a).unwrap();
     }
 
     #[test]
