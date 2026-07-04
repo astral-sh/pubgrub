@@ -2,6 +2,12 @@
 
 Changelog for the version-ranges crate.
 
+## Unreleased
+
+### Added
+
+- Add `Ranges::widen_versions`, which widens each segment to the largest interval containing the same given versions and merges segments that no version separates ([#73](https://github.com/astral-sh/pubgrub/pull/73)).
+
 ## v0.2.0 - 2026-06-29
 
 ### Breaking
