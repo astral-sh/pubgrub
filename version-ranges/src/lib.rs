@@ -901,6 +901,48 @@ impl<V: Ord + Clone> Ranges<V> {
         Self { segments }.check_invariants()
     }
 
+    /// Returns a copy of this set where each segment is shrunk to the smallest interval that
+    /// contains the same given versions, with inclusive bounds on those versions.
+    ///
+    /// This is the display-oriented inverse of [`Ranges::widen_versions`]: bounds that exclude
+    /// no existing version carry no information, so each segment can shrink to the first and
+    /// last version it contains. For example, with the existing versions `1, 2, 3, 4`, the
+    /// segment `(1, 3)` shrinks to `{2}`, and `(1, ∞)` shrinks to `[2, 4]`. A segment that
+    /// contains none of the given versions is kept unchanged.
+    ///
+    /// The result is a subset of the input: For every one of the given versions, input and
+    /// output agree on whether it is contained, while versions not in `versions` may be
+    /// removed, but are never added.
+    ///
+    /// The `versions` slice must be sorted.
+    pub fn narrow_versions<BV>(&self, versions: &[BV]) -> Self
+    where
+        BV: Borrow<V>,
+    {
+        debug_assert!(
+            versions.is_sorted_by(|l, r| l.borrow() <= r.borrow()),
+            "`narrow_versions` `versions` argument incorrectly sorted"
+        );
+        let mut segments: SmallVec<[Interval<V>; 1]> = SmallVec::new();
+        for segment in &self.segments {
+            // The first and last version inside the segment become the new inclusive bounds.
+            let first =
+                versions.partition_point(|v| within_bounds(v.borrow(), segment) == Ordering::Less);
+            let last = versions
+                .partition_point(|v| within_bounds(v.borrow(), segment) != Ordering::Greater);
+            if first == last {
+                // The segment contains none of the versions, keep it unchanged.
+                segments.push(segment.clone());
+            } else {
+                segments.push((
+                    Included(versions[first].borrow().clone()),
+                    Included(versions[last - 1].borrow().clone()),
+                ));
+            }
+        }
+        Self { segments }.check_invariants()
+    }
+
     /// Returns a simpler representation that contains the same versions.
     ///
     /// For every one of the Versions provided in versions the existing range and the simplified range will agree on whether it is contained.
@@ -1528,6 +1570,25 @@ pub mod tests {
         }
 
         #[test]
+        fn narrow_versions(range in proptest_strategy(), mut versions in proptest::collection::vec(version_strat(), ..30)) {
+            versions.sort();
+            let narrowed = range.narrow_versions(&versions);
+
+            // The result is a subset of the input that agrees on all given versions.
+            assert!(narrowed.subset_of(&range));
+            for v in &versions {
+                assert_eq!(range.contains(v), narrowed.contains(v));
+            }
+            // The operation is idempotent.
+            assert_eq!(narrowed.narrow_versions(&versions), narrowed);
+            // Narrowing a widened set restores agreement on all given versions.
+            let round_trip = range.widen_versions(&versions).narrow_versions(&versions);
+            for v in &versions {
+                assert_eq!(range.contains(v), round_trip.contains(v));
+            }
+        }
+
+        #[test]
         fn from_iter_valid(segments in proptest::collection::vec(any::<(Bound<u32>, Bound<u32>)>(), ..30)) {
             let mut expected = Ranges::empty();
             for segment in &segments {
@@ -1593,6 +1654,28 @@ pub mod tests {
             Ranges::strictly_lower_than(2u32)
                 .union(&Ranges::from_range_bounds((Excluded(2u32), Excluded(5u32))))
         );
+    }
+
+    #[test]
+    fn narrow_versions_shrinks_to_contained_versions() {
+        let versions = [1u32, 2, 3, 5, 9];
+        // A segment shrinks to the versions it contains, with inclusive bounds.
+        assert_eq!(
+            Ranges::from_range_bounds((Excluded(2u32), Excluded(5u32))).narrow_versions(&versions),
+            Ranges::singleton(3u32)
+        );
+        // An unbounded segment shrinks to the first and last contained version.
+        assert_eq!(
+            Ranges::strictly_higher_than(2u32).narrow_versions(&versions),
+            Ranges::from_range_bounds((Included(3u32), Included(9u32)))
+        );
+        assert_eq!(
+            Ranges::<u32>::full().narrow_versions(&versions),
+            Ranges::from_range_bounds((Included(1u32), Included(9u32)))
+        );
+        // A segment containing no version is kept unchanged.
+        let range = Ranges::from_range_bounds((Excluded(5u32), Excluded(9u32)));
+        assert_eq!(range.narrow_versions(&versions), range);
     }
 
     #[test]
