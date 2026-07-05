@@ -862,6 +862,8 @@ impl<V: Ord + Clone> Ranges<V> {
     /// output agree on whether it is contained, while versions not in `versions` may be added,
     /// but are never removed.
     ///
+    /// See [`Ranges::narrow_versions`] for the display-oriented inverse.
+    ///
     /// The `versions` slice must be sorted.
     pub fn widen_versions<BV>(&self, versions: &[BV]) -> Self
     where
