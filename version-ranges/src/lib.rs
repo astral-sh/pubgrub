@@ -903,14 +903,16 @@ impl<V: Ord + Clone> Ranges<V> {
         Self { segments }.check_invariants()
     }
 
-    /// Returns a copy of this set where each segment is shrunk to the smallest interval that
-    /// contains the same given versions, with inclusive bounds on those versions.
+    /// Returns a copy of this set where each segment's bounded ends are shrunk to inclusive
+    /// bounds on the outermost given versions the segment contains.
     ///
     /// This is the display-oriented inverse of [`Ranges::widen_versions`]: bounds that exclude
     /// no existing version carry no information, so each segment can shrink to the first and
     /// last version it contains. For example, with the existing versions `1, 2, 3, 4`, the
-    /// segment `(1, 3)` shrinks to `{2}`, and `(1, ∞)` shrinks to `[2, 4]`. A segment that
-    /// contains none of the given versions is kept unchanged.
+    /// segment `(1, 3)` shrinks to `{2}`. Unbounded ends are kept, so a claim about all
+    /// versions beyond the given ones (e.g. versions not yet published) remains visible:
+    /// `(1, ∞)` shrinks to `[2, ∞)`, not `[2, 4]`. A segment that contains none of the given
+    /// versions is kept unchanged.
     ///
     /// The result is a subset of the input: For every one of the given versions, input and
     /// output agree on whether it is contained, while versions not in `versions` may be
@@ -936,10 +938,15 @@ impl<V: Ord + Clone> Ranges<V> {
                 // The segment contains none of the versions, keep it unchanged.
                 segments.push(segment.clone());
             } else {
-                segments.push((
-                    Included(versions[first].borrow().clone()),
-                    Included(versions[last - 1].borrow().clone()),
-                ));
+                let start = match &segment.0 {
+                    Unbounded => Unbounded,
+                    _ => Included(versions[first].borrow().clone()),
+                };
+                let end = match &segment.1 {
+                    Unbounded => Unbounded,
+                    _ => Included(versions[last - 1].borrow().clone()),
+                };
+                segments.push((start, end));
             }
         }
         Self { segments }.check_invariants()
@@ -1666,14 +1673,14 @@ pub mod tests {
             Ranges::from_range_bounds((Excluded(2u32), Excluded(5u32))).narrow_versions(&versions),
             Ranges::singleton(3u32)
         );
-        // An unbounded segment shrinks to the first and last contained version.
+        // Unbounded ends are kept, only the bounded end shrinks.
         assert_eq!(
             Ranges::strictly_higher_than(2u32).narrow_versions(&versions),
-            Ranges::from_range_bounds((Included(3u32), Included(9u32)))
+            Ranges::higher_than(3u32)
         );
         assert_eq!(
             Ranges::<u32>::full().narrow_versions(&versions),
-            Ranges::from_range_bounds((Included(1u32), Included(9u32)))
+            Ranges::full()
         );
         // A segment containing no version is kept unchanged.
         let range = Ranges::from_range_bounds((Excluded(5u32), Excluded(9u32)));
