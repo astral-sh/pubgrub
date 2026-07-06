@@ -584,6 +584,16 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             .map(|pa| pa.assignments_intersection.term())
     }
 
+    /// Iterate over each package and its current term intersection in the partial solution.
+    ///
+    /// This includes both decided and undecided packages. Assignments removed by backtracking are
+    /// not included. The iteration order is unspecified.
+    pub fn package_terms(&self) -> impl Iterator<Item = (Id<DP::P>, &Term<DP::VS>)> {
+        self.package_assignments
+            .iter()
+            .map(|(&package, assignments)| (package, assignments.assignments_intersection.term()))
+    }
+
     /// Figure out if the satisfier and previous satisfier are of different decision levels.
     #[allow(clippy::type_complexity)]
     pub(crate) fn satisfier_search(

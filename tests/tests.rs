@@ -9,6 +9,38 @@ use std::convert::Infallible;
 type NumVS = Ranges<u32>;
 
 #[test]
+fn package_terms_reflect_backtracking() {
+    type Provider = OfflineDependencyProvider<&'static str, NumVS>;
+
+    let mut state: State<Provider> = State::init("root", 0);
+    state.unit_propagation(state.root_package).unwrap();
+    state.add_package_version_dependencies(state.root_package, 0, [("foo", Ranges::full())]);
+    state.unit_propagation(state.root_package).unwrap();
+
+    let foo = state.package_store.alloc("foo");
+    state.add_package_version_dependencies(foo, 0, [("bar", Ranges::full())]);
+    state.unit_propagation(foo).unwrap();
+
+    let mut packages = state
+        .partial_solution
+        .package_terms()
+        .map(|(package, _)| state.package_store[package])
+        .collect::<Vec<_>>();
+    packages.sort_unstable();
+    assert_eq!(packages, ["bar", "foo", "root"]);
+
+    assert_eq!(state.backtrack_package(foo), Some(1));
+
+    let mut packages = state
+        .partial_solution
+        .package_terms()
+        .map(|(package, _)| state.package_store[package])
+        .collect::<Vec<_>>();
+    packages.sort_unstable();
+    assert_eq!(packages, ["foo", "root"]);
+}
+
+#[test]
 fn cloned_incompatibility_does_not_reuse_contradiction_cache() {
     type Provider = OfflineDependencyProvider<String, NumVS>;
 
