@@ -79,6 +79,30 @@ pub trait VersionSet: Debug + Display + Clone + Eq + Hash {
         self == other
     }
 
+    /// Whether this set may refine candidate selection without narrowing version membership.
+    ///
+    /// PubGrub uses this as a fast path before consulting [`VersionSet::selection_refinement`].
+    /// Implementations that override that method must also override this one and return `true` for
+    /// every set that could contribute a refinement.
+    fn may_refine_selection(&self) -> bool {
+        false
+    }
+
+    /// Refine candidate-selection metadata with a logically redundant constraint.
+    ///
+    /// PubGrub calls this method when an active dependency requirement already contains the
+    /// package's current version set, but may still contribute metadata that affects candidate
+    /// selection. Implementations that carry such metadata should return the result of combining
+    /// `self` with `requirement`, or `None` when candidate selection would not change. The returned
+    /// set must compare equal to `self` and must not be selection-equivalent to it.
+    ///
+    /// The default assumes candidate selection depends only on version membership. Implementations
+    /// whose [`VersionSet::intersection`] can add candidate-selection metadata from a logically
+    /// redundant operand must override this method and [`VersionSet::may_refine_selection`].
+    fn selection_refinement(&self, _requirement: &Self) -> Option<Self> {
+        None
+    }
+
     // Automatically implemented functions
 
     /// The set containing all versions.

@@ -78,6 +78,12 @@ pub struct State<DP: DependencyProvider> {
     /// It can definitely be a local variable to that method, but
     /// this way we can reuse the same allocation for better performance.
     unit_propagation_buffer: SmallVec<Id<DP::P>>,
+
+    /// Packages targeted by dependencies that can contribute candidate-selection metadata.
+    selection_refinement_packages: Set<Id<DP::P>>,
+
+    /// Whether backtracking may have removed active candidate-selection refinements.
+    selection_refinements_dirty: bool,
 }
 
 impl<DP: DependencyProvider> State<DP> {
@@ -101,6 +107,8 @@ impl<DP: DependencyProvider> State<DP> {
             package_store,
             unit_propagation_buffer: SmallVec::Empty,
             merged_dependencies: MergedDependencies::default(),
+            selection_refinement_packages: Set::default(),
+            selection_refinements_dirty: false,
         }
     }
 
@@ -123,6 +131,11 @@ impl<DP: DependencyProvider> State<DP> {
 
     /// Add an incompatibility to the state.
     pub fn add_incompatibility(&mut self, mut incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
+        if let Some((_, package, Some(requirement))) = incompat.as_dependency()
+            && requirement.may_refine_selection()
+        {
+            self.selection_refinement_packages.insert(package);
+        }
         // Cached contradictions are only valid in the state that recorded them.
         incompat.reset_contradiction_cache();
         let id = self.incompatibility_store.alloc(incompat);
@@ -150,6 +163,9 @@ impl<DP: DependencyProvider> State<DP> {
         base_package: Id<DP::P>,
         versions: DP::VS,
     ) {
+        if versions.may_refine_selection() {
+            self.selection_refinement_packages.insert(base_package);
+        }
         let incompat = Incompatibility::from_dependency(
             proxy_package,
             versions.clone(),
@@ -172,16 +188,22 @@ impl<DP: DependencyProvider> State<DP> {
         deps: impl IntoIterator<Item = (DP::P, DP::VS)>,
     ) -> std::ops::Range<IncompDpId<DP>> {
         // Create incompatibilities and allocate them in the store.
+        let mut selection_refinement_packages: Set<Id<DP::P>> = Set::default();
         let new_incompats_id_range =
             self.incompatibility_store
                 .alloc_iter(deps.into_iter().map(|(dep_p, dep_vs)| {
                     let dep_pid = self.package_store.alloc(dep_p);
+                    if dep_vs.may_refine_selection() {
+                        selection_refinement_packages.insert(dep_pid);
+                    }
                     Incompatibility::from_dependency(
                         package,
                         <DP::VS as VersionSet>::singleton(version.clone()),
                         (dep_pid, dep_vs),
                     )
                 }));
+        self.selection_refinement_packages
+            .extend(selection_refinement_packages);
         // Merge the newly created incompatibilities with the older ones.
         for id in IncompDpId::<DP>::range_to_iter(new_incompats_id_range.clone()) {
             self.merge_incompatibility(id);
@@ -209,6 +231,11 @@ impl<DP: DependencyProvider> State<DP> {
             let mut conflict_id = None;
             // We only care about incompatibilities if it contains the current package.
             for &incompat_id in self.incompatibilities[&current_package].iter().rev() {
+                self.partial_solution.add_selection_derivation(
+                    current_package,
+                    incompat_id,
+                    &self.incompatibility_store,
+                );
                 if self
                     .partial_solution
                     .is_contradicted(&self.incompatibility_store[incompat_id])
@@ -272,8 +299,34 @@ impl<DP: DependencyProvider> State<DP> {
                     .mark_contradicted(&mut self.incompatibility_store[root_cause]);
             }
         }
+        self.refresh_selection_refinements();
         // If there are no more changed packages, unit propagation is done.
         Ok(satisfier_causes)
+    }
+
+    /// Restore candidate-selection refinements that remain active after backtracking.
+    ///
+    /// A backjump may remove a target decision and a later dependent decision while leaving the
+    /// dependent positively constrained to versions covered by its stored dependency edge. Since
+    /// propagation can resume from an unrelated package, refresh every target that may carry
+    /// selection metadata before the next priority or version decision.
+    fn refresh_selection_refinements(&mut self) {
+        if !std::mem::take(&mut self.selection_refinements_dirty) {
+            return;
+        }
+
+        for &package in &self.selection_refinement_packages {
+            let Some(incompatibilities) = self.incompatibilities.get(&package) else {
+                continue;
+            };
+            for &incompatibility in incompatibilities {
+                self.partial_solution.add_selection_derivation(
+                    package,
+                    incompatibility,
+                    &self.incompatibility_store,
+                );
+            }
+        }
     }
 
     /// Return the root cause or the terminal incompatibility. CF
@@ -364,6 +417,7 @@ impl<DP: DependencyProvider> State<DP> {
         decision_level: DecisionLevel,
     ) {
         self.partial_solution.backtrack(decision_level);
+        self.selection_refinements_dirty = !self.selection_refinement_packages.is_empty();
         if incompat_changed {
             self.merge_incompatibility(incompat);
         }
@@ -378,6 +432,8 @@ impl<DP: DependencyProvider> State<DP> {
     pub fn backtrack_package(&mut self, package: Id<DP::P>) -> Option<u32> {
         let base_decision_level = self.partial_solution.current_decision_level();
         let new_decision_level = self.partial_solution.backtrack_package(package).ok()?;
+        self.selection_refinements_dirty = !self.selection_refinement_packages.is_empty();
+        self.refresh_selection_refinements();
         Some(base_decision_level.get() - new_decision_level.get())
     }
 
@@ -532,6 +588,118 @@ mod dependency_merge_tests {
         assert_eq!(state.incompatibilities[&dependency].len(), 2);
     }
 
+    #[test]
+    fn derives_selection_metadata_from_active_redundant_dependency() {
+        let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
+            State::init("root", 0);
+        state.unit_propagation(state.root_package).unwrap();
+
+        state.add_package_version_dependencies(
+            state.root_package,
+            0,
+            [
+                ("dependency", CollidingRanges::singleton(1)),
+                (
+                    "parent",
+                    CollidingRanges {
+                        versions: Ranges::from_range_bounds(1u32..=2),
+                        selected: false,
+                    },
+                ),
+            ],
+        );
+        state.unit_propagation(state.root_package).unwrap();
+
+        let parent = state.package_store.alloc("parent");
+        let dependency = state.package_store.alloc("dependency");
+        let is_selected = |state: &State<OfflineDependencyProvider<&str, CollidingRanges>>| {
+            state
+                .partial_solution
+                .term_intersection_for_package(dependency)
+                .unwrap()
+                .unwrap_positive()
+                .selected
+        };
+        assert!(!is_selected(&state));
+
+        state.add_package_version_dependencies(
+            parent,
+            2,
+            [("dependency", CollidingRanges::singleton(1).selected())],
+        );
+        state.unit_propagation(parent).unwrap();
+
+        assert!(is_selected(&state));
+
+        assert_eq!(state.backtrack_package(parent), Some(1));
+        assert!(!is_selected(&state));
+
+        // The dependency incompatibility remains in the store, but the parent is no longer
+        // constrained to the version that introduced it, so propagation must not restore the
+        // refinement.
+        state.unit_propagation(parent).unwrap();
+        state.unit_propagation(dependency).unwrap();
+        assert!(!is_selected(&state));
+
+        // Selecting the same parent version again reactivates the already-stored dependency and
+        // restores its selection refinement without fetching its dependencies again.
+        state.partial_solution.add_decision(parent, 2);
+        state.unit_propagation(parent).unwrap();
+        assert!(is_selected(&state));
+    }
+
+    #[test]
+    fn reapplies_selection_metadata_before_selecting_after_backtrack() {
+        let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
+            State::init("root", 0);
+        state.unit_propagation(state.root_package).unwrap();
+
+        state.add_package_version_dependencies(
+            state.root_package,
+            0,
+            [
+                ("dependency", CollidingRanges::singleton(1)),
+                ("parent", CollidingRanges::singleton(2)),
+                ("unrelated", CollidingRanges::singleton(1)),
+            ],
+        );
+        state.unit_propagation(state.root_package).unwrap();
+
+        let parent = state.package_store.alloc("parent");
+        let dependency = state.package_store.alloc("dependency");
+        let unrelated = state.package_store.alloc("unrelated");
+        let is_selected = |state: &State<OfflineDependencyProvider<&str, CollidingRanges>>| {
+            state
+                .partial_solution
+                .term_intersection_for_package(dependency)
+                .unwrap()
+                .unwrap_positive()
+                .selected
+        };
+
+        // Decide the dependency target before discovering the parent's selection refinement.
+        state.add_package_version_dependencies(dependency, 1, []);
+        state.unit_propagation(dependency).unwrap();
+        state.add_package_version_dependencies(
+            parent,
+            2,
+            [("dependency", CollidingRanges::singleton(1).selected())],
+        );
+        state.unit_propagation(parent).unwrap();
+        assert!(!is_selected(&state));
+
+        // Backtracking the target also removes the later parent decision, but the root still
+        // constrains the parent to the version that introduced the selection refinement. The
+        // public backtracking operation must restore that refinement before returning: uv can
+        // reprioritize and select another package without running unit propagation again.
+        assert_eq!(state.backtrack_package(dependency), Some(2));
+        assert!(is_selected(&state));
+
+        // Subsequent propagation can resume from an unrelated package without changing it.
+        state.unit_propagation(unrelated).unwrap();
+        assert!(is_selected(&state));
+    }
+
     #[derive(Clone, Debug)]
     struct CollidingRanges {
         versions: Ranges<u32>,
@@ -602,6 +770,15 @@ mod dependency_merge_tests {
 
         fn selection_eq(&self, other: &Self) -> bool {
             self == other && self.selected == other.selected
+        }
+
+        fn may_refine_selection(&self) -> bool {
+            self.selected
+        }
+
+        fn selection_refinement(&self, requirement: &Self) -> Option<Self> {
+            let refined = self.intersection(requirement);
+            (self == &refined && !self.selection_eq(&refined)).then_some(refined)
         }
     }
 }

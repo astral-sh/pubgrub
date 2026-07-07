@@ -362,6 +362,55 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         }
     }
 
+    /// Record candidate-selection metadata from a logically redundant dependency.
+    ///
+    /// The dependency incompatibility is already contradicted by the package's positive term, so
+    /// this derivation cannot change version membership and must not trigger unit propagation. It
+    /// remains on the ordinary derivation trail so backtracking the dependent also removes the
+    /// refinement.
+    pub(crate) fn add_selection_derivation(
+        &mut self,
+        active_package: Id<DP::P>,
+        cause: IncompDpId<DP>,
+        store: &Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
+    ) -> bool {
+        let Some((dependent, package, Some(requirement))) = store[cause].as_dependency() else {
+            return false;
+        };
+        if dependent == package || (dependent != active_package && package != active_package) {
+            return false;
+        }
+        if !requirement.may_refine_selection() {
+            return false;
+        }
+        let Some(dependent_term) = store[cause].get(dependent) else {
+            return false;
+        };
+        let Some(active_dependent) = self.term_intersection_for_package(dependent) else {
+            return false;
+        };
+        if !matches!(
+            dependent_term.relation_with(active_dependent),
+            crate::term::Relation::Satisfied
+        ) {
+            return false;
+        }
+        let Some(PackageAssignments {
+            assignments_intersection: AssignmentsIntersection::Derivations(Term::Positive(current)),
+            ..
+        }) = self.package_assignments.get(&package)
+        else {
+            return false;
+        };
+        let Some(refined) = current.selection_refinement(requirement) else {
+            return false;
+        };
+        debug_assert_eq!(refined, *current);
+        debug_assert!(!refined.selection_eq(current));
+        self.add_derivation(package, cause, store);
+        true
+    }
+
     #[cold]
     pub fn prioritized_packages(&self) -> impl Iterator<Item = (Id<DP::P>, &DP::VS)> {
         // TODO(konsti): Should we use `self.outdated_priorities` instead?
