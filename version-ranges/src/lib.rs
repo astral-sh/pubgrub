@@ -46,7 +46,7 @@ use std::ops::RangeBounds;
 
 #[cfg(any(feature = "proptest", test))]
 use proptest::prelude::*;
-use smallvec::{SmallVec, smallvec};
+use smallvec::{smallvec, SmallVec};
 
 /// Ranges represents multiple intervals of a continuous range of monotone increasing values.
 ///
