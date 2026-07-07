@@ -67,6 +67,11 @@ pub trait VersionSet: Debug + Display + Clone + Eq + Hash {
     /// [`DependencyProvider::choose_version`](crate::DependencyProvider::choose_version) returns
     /// without changing the set's version membership. Dependency incompatibilities carrying
     /// different selection metadata must remain distinct even though the sets compare equal.
+    /// Selection metadata must not change whether a candidate exists: for the same package and any
+    /// two sets where `self == other`, a dependency provider must return `Some` from
+    /// `choose_version` for both or `None` for both. PubGrub records a membership-based
+    /// incompatibility after `choose_version` returns `None`, so that result must remain valid
+    /// across selection-metadata refinements.
     ///
     /// This method must be an equivalence relation, and returning `true` requires `self == other`.
     /// It may return `false` for sets that compare equal when their selection metadata differs.
@@ -94,11 +99,12 @@ pub trait VersionSet: Debug + Display + Clone + Eq + Hash {
     /// package's current version set, but may still contribute metadata that affects candidate
     /// selection. Implementations that carry such metadata should return the result of combining
     /// `self` with `requirement`, or `None` when candidate selection would not change. The returned
-    /// set must compare equal to `self` and must not be selection-equivalent to it.
+    /// set must compare equal to `self` and must not be selection-equivalent to it. PubGrub stores
+    /// the returned value directly; it does not need to be reproducible by [`Self::intersection`].
     ///
     /// The default assumes candidate selection depends only on version membership. Implementations
-    /// whose [`VersionSet::intersection`] can add candidate-selection metadata from a logically
-    /// redundant operand must override this method and [`VersionSet::may_refine_selection`].
+    /// whose logically redundant constraints can add candidate-selection metadata must override
+    /// this method and [`VersionSet::may_refine_selection`].
     fn selection_refinement(&self, _requirement: &Self) -> Option<Self> {
         None
     }

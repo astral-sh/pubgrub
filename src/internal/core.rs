@@ -760,7 +760,9 @@ mod dependency_merge_tests {
         fn intersection(&self, other: &Self) -> Self {
             Self {
                 versions: self.versions.intersection(&other.versions),
-                selected: self.selected || other.selected,
+                // Candidate-selection refinements are applied explicitly below; ordinary set
+                // intersection intentionally preserves the left operand's metadata.
+                selected: self.selected,
             }
         }
 
@@ -777,7 +779,10 @@ mod dependency_merge_tests {
         }
 
         fn selection_refinement(&self, requirement: &Self) -> Option<Self> {
-            let refined = self.intersection(requirement);
+            let refined = Self {
+                versions: self.versions.intersection(&requirement.versions),
+                selected: self.selected || requirement.selected,
+            };
             (self == &refined && !self.selection_eq(&refined)).then_some(refined)
         }
     }

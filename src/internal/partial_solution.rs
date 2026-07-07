@@ -320,12 +320,34 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         cause: IncompDpId<DP>,
         store: &Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
     ) {
+        let derivation = store[cause].get(package).unwrap().negate();
+        let accumulated_intersection = match self.package_assignments.get(&package) {
+            Some(PackageAssignments {
+                assignments_intersection: AssignmentsIntersection::Derivations(current),
+                ..
+            }) => current.intersection(&derivation),
+            Some(PackageAssignments {
+                assignments_intersection: AssignmentsIntersection::Decision { .. },
+                ..
+            }) => panic!("add_derivation should not be called after a decision"),
+            None => derivation,
+        };
+        self.add_accumulated_derivation(package, cause, accumulated_intersection);
+    }
+
+    /// Append a derivation whose accumulated intersection has already been computed.
+    fn add_accumulated_derivation(
+        &mut self,
+        package: Id<DP::P>,
+        cause: IncompDpId<DP>,
+        accumulated_intersection: Term<DP::VS>,
+    ) {
         use indexmap::map::Entry;
-        let mut dated_derivation = DatedDerivation {
+        let dated_derivation = DatedDerivation {
             global_index: self.next_global_index,
             decision_level: self.current_decision_level,
             cause,
-            accumulated_intersection: store[cause].get(package).unwrap().negate(),
+            accumulated_intersection: accumulated_intersection.clone(),
         };
         self.next_global_index += 1;
         match self.package_assignments.entry(package) {
@@ -333,30 +355,29 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
                 let pa = occupied.get_mut();
                 pa.highest_decision_level = self.current_decision_level;
                 match &mut pa.assignments_intersection {
-                    // Check that add_derivation is never called in the wrong context.
                     AssignmentsIntersection::Decision { .. } => {
-                        panic!("add_derivation should not be called after a decision")
+                        panic!("add_accumulated_derivation should not be called after a decision")
                     }
                     AssignmentsIntersection::Derivations(t) => {
-                        *t = t.intersection(&dated_derivation.accumulated_intersection);
-                        dated_derivation.accumulated_intersection = t.clone();
-                        if t.is_positive() {
-                            self.outdated_priorities.insert(package);
-                        }
+                        *t = accumulated_intersection;
                     }
+                }
+                if dated_derivation.accumulated_intersection.is_positive() {
+                    self.outdated_priorities.insert(package);
                 }
                 pa.dated_derivations.push(dated_derivation);
             }
             Entry::Vacant(v) => {
-                let term = dated_derivation.accumulated_intersection.clone();
-                if term.is_positive() {
+                if accumulated_intersection.is_positive() {
                     self.outdated_priorities.insert(package);
                 }
                 v.insert(PackageAssignments {
                     smallest_decision_level: self.current_decision_level,
                     highest_decision_level: self.current_decision_level,
                     dated_derivations: SmallVec::One([dated_derivation]),
-                    assignments_intersection: AssignmentsIntersection::Derivations(term),
+                    assignments_intersection: AssignmentsIntersection::Derivations(
+                        accumulated_intersection,
+                    ),
                 });
             }
         }
@@ -407,7 +428,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         };
         debug_assert_eq!(refined, *current);
         debug_assert!(!refined.selection_eq(current));
-        self.add_derivation(package, cause, store);
+        self.add_accumulated_derivation(package, cause, Term::Positive(refined));
         true
     }
 
