@@ -103,7 +103,7 @@ impl<VS: VersionSet> Term<VS> {
         match (self, other) {
             (Self::Positive(r1), Self::Positive(r2)) => Self::Positive(r1.intersection(r2)),
             (Self::Positive(p), Self::Negative(n)) | (Self::Negative(n), Self::Positive(p)) => {
-                Self::Positive(n.complement().intersection(p))
+                Self::Positive(p.difference(n))
             }
             (Self::Negative(r1), Self::Negative(r2)) => Self::Negative(r1.union(r2)),
         }
@@ -131,7 +131,7 @@ impl<VS: VersionSet> Term<VS> {
         match (self, other) {
             (Self::Positive(r1), Self::Positive(r2)) => Self::Positive(r1.union(r2)),
             (Self::Positive(p), Self::Negative(n)) | (Self::Negative(n), Self::Positive(p)) => {
-                Self::Negative(p.complement().intersection(n))
+                Self::Negative(n.difference(p))
             }
             (Self::Negative(r1), Self::Negative(r2)) => Self::Negative(r1.intersection(r2)),
         }
@@ -256,6 +256,9 @@ impl<VS: VersionSet + Display> Display for Term<VS> {
 
 #[cfg(test)]
 pub mod tests {
+    use std::hash::{Hash, Hasher};
+    use std::ops::Bound::{Excluded, Included};
+
     use super::*;
     use proptest::prelude::*;
     use version_ranges::Ranges;
@@ -263,9 +266,112 @@ pub mod tests {
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     struct NoDisjointRanges(Ranges<u32>);
 
+    #[derive(Clone, Debug, Eq, Hash, PartialEq)]
+    struct DirectDifferenceRanges(Ranges<u32>);
+
+    #[derive(Clone, Debug)]
+    struct LeftBiasedRanges {
+        versions: Ranges<u32>,
+        selection_marker: bool,
+    }
+
+    impl PartialEq for LeftBiasedRanges {
+        fn eq(&self, other: &Self) -> bool {
+            self.versions == other.versions
+        }
+    }
+
+    impl Eq for LeftBiasedRanges {}
+
+    impl Hash for LeftBiasedRanges {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.versions.hash(state);
+        }
+    }
+
     impl Display for NoDisjointRanges {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             self.0.fmt(f)
+        }
+    }
+
+    impl Display for DirectDifferenceRanges {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+
+    impl Display for LeftBiasedRanges {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            self.versions.fmt(f)
+        }
+    }
+
+    impl VersionSet for DirectDifferenceRanges {
+        type V = u32;
+
+        fn empty() -> Self {
+            Self(Ranges::empty())
+        }
+
+        fn singleton(version: Self::V) -> Self {
+            Self(Ranges::singleton(version))
+        }
+
+        fn complement(&self) -> Self {
+            panic!("mixed-sign term operations should use direct difference")
+        }
+
+        fn intersection(&self, other: &Self) -> Self {
+            Self(self.0.intersection(&other.0))
+        }
+
+        fn difference(&self, other: &Self) -> Self {
+            Self(self.0.difference(&other.0))
+        }
+
+        fn contains(&self, version: &Self::V) -> bool {
+            self.0.contains(version)
+        }
+    }
+
+    impl VersionSet for LeftBiasedRanges {
+        type V = u32;
+
+        fn empty() -> Self {
+            Self {
+                versions: Ranges::empty(),
+                selection_marker: false,
+            }
+        }
+
+        fn singleton(version: Self::V) -> Self {
+            Self {
+                versions: Ranges::singleton(version),
+                selection_marker: false,
+            }
+        }
+
+        fn complement(&self) -> Self {
+            Self {
+                versions: self.versions.complement(),
+                selection_marker: self.selection_marker,
+            }
+        }
+
+        fn intersection(&self, other: &Self) -> Self {
+            Self {
+                versions: self.versions.intersection(&other.versions),
+                selection_marker: self.selection_marker,
+            }
+        }
+
+        fn contains(&self, version: &Self::V) -> bool {
+            self.versions.contains(version)
+        }
+
+        fn selection_eq(&self, other: &Self) -> bool {
+            self == other && self.selection_marker == other.selection_marker
         }
     }
 
@@ -312,6 +418,53 @@ pub mod tests {
             term.relation_with(&Term::empty()),
             Relation::Satisfied
         ));
+    }
+
+    #[test]
+    fn mixed_sign_operations_use_direct_difference() {
+        let positive = DirectDifferenceRanges(Ranges::from_range_bounds(1_u32..=5_u32));
+        let negative = DirectDifferenceRanges(Ranges::from_range_bounds(2_u32..4_u32));
+        let difference = DirectDifferenceRanges(positive.0.difference(&negative.0));
+
+        assert_eq!(
+            Term::Positive(positive.clone()).intersection(&Term::Negative(negative.clone())),
+            Term::Positive(difference.clone())
+        );
+        assert_eq!(
+            Term::Negative(positive).union(&Term::Positive(negative)),
+            Term::Negative(difference)
+        );
+    }
+
+    #[test]
+    fn default_difference_preserves_intersection_operand_order() {
+        let positive = LeftBiasedRanges {
+            versions: Ranges::from_range_bounds(1_u32..=3_u32),
+            selection_marker: false,
+        };
+        let negative = LeftBiasedRanges {
+            versions: Ranges::from_range_bounds(2_u32..=5_u32),
+            selection_marker: true,
+        };
+
+        let Term::Positive(intersection) =
+            Term::Positive(positive.clone()).intersection(&Term::Negative(negative.clone()))
+        else {
+            panic!("a mixed-sign intersection must be positive");
+        };
+        assert_eq!(
+            intersection.versions,
+            Ranges::from_range_bounds(1_u32..2_u32)
+        );
+        assert!(intersection.selection_marker);
+
+        let Term::Negative(union) = Term::Positive(positive).union(&Term::Negative(negative))
+        else {
+            panic!("a mixed-sign union must be negative");
+        };
+        let expected = [(Excluded(3_u32), Included(5_u32))].into_iter().collect();
+        assert_eq!(union.versions, expected);
+        assert!(!union.selection_marker);
     }
 
     #[test]

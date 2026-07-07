@@ -47,6 +47,17 @@ pub trait VersionSet: Debug + Display + Clone + Eq + Hash {
     /// The set of all versions that are in both sets.
     fn intersection(&self, other: &Self) -> Self;
 
+    /// The set of all versions that are in `self` but not in `other`.
+    ///
+    /// The default implementation intersects the complement of `other` with `self`. The operand
+    /// order is intentional because intersection may propagate candidate-selection metadata
+    /// directionally. Implementations can override this method to avoid constructing the
+    /// complement, but the result must be selection-equivalent to the default expression under
+    /// [`VersionSet::selection_eq`].
+    fn difference(&self, other: &Self) -> Self {
+        other.complement().intersection(self)
+    }
+
     /// Whether the version is part of this set.
     fn contains(&self, v: &Self::V) -> bool;
 
@@ -131,6 +142,10 @@ impl<T: Debug + Display + Clone + Eq + Ord + Hash> VersionSet for Ranges<T> {
 
     fn intersection(&self, other: &Self) -> Self {
         Ranges::intersection(self, other)
+    }
+
+    fn difference(&self, other: &Self) -> Self {
+        Ranges::difference(self, other)
     }
 
     fn contains(&self, v: &Self::V) -> bool {

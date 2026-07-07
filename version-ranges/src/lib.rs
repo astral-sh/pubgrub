@@ -46,7 +46,7 @@ use std::ops::RangeBounds;
 
 #[cfg(any(feature = "proptest", test))]
 use proptest::prelude::*;
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 
 /// Ranges represents multiple intervals of a continuous range of monotone increasing values.
 ///
@@ -725,6 +725,77 @@ impl<V: Ord + Clone> Ranges<V> {
         Self { segments: output }.check_invariants()
     }
 
+    /// Computes the difference between this `Ranges` and another.
+    ///
+    /// The result contains every value in `self` that is not in `other`.
+    pub fn difference(&self, other: &Self) -> Self {
+        if other.is_empty() {
+            return self.clone();
+        }
+        if matches!(other.segments.as_slice(), [(Unbounded, Unbounded)]) {
+            return Self::empty();
+        }
+
+        let mut output = SmallVec::new();
+        let mut other_index = 0;
+
+        for (self_start, self_end) in &self.segments {
+            let mut remaining_start = None;
+
+            loop {
+                let start = remaining_start.as_ref().unwrap_or(self_start);
+                let Some((other_start, other_end)) = other.segments.get(other_index) else {
+                    if valid_segment(start, self_end) {
+                        output.push((start.clone(), self_end.clone()));
+                    }
+                    break;
+                };
+
+                // Skip exclusions that end before the remaining part of this segment.
+                if !valid_segment(start, other_end) {
+                    other_index += 1;
+                    continue;
+                }
+
+                // The remaining exclusions start after this segment, so the rest is retained.
+                if !valid_segment(other_start, self_end) {
+                    if valid_segment(start, self_end) {
+                        output.push((start.clone(), self_end.clone()));
+                    }
+                    break;
+                }
+
+                // Retain the portion before this exclusion.
+                let before_exclusion = match other_start {
+                    Included(version) => Some(Excluded(version.clone())),
+                    Excluded(version) => Some(Included(version.clone())),
+                    Unbounded => None,
+                };
+                if let Some(end) = before_exclusion {
+                    if valid_segment(start, &end) {
+                        output.push((start.clone(), end));
+                    }
+                }
+
+                // If the exclusion ends before this segment, continue after it. Otherwise the
+                // remainder of this segment is excluded. Keep the exclusion available for the
+                // next segment when it extends beyond this one.
+                if left_end_is_smaller(other_end.as_ref(), self_end.as_ref()) {
+                    remaining_start = Some(match other_end {
+                        Included(version) => Excluded(version.clone()),
+                        Excluded(version) => Included(version.clone()),
+                        Unbounded => break,
+                    });
+                    other_index += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        Self { segments: output }.check_invariants()
+    }
+
     /// Return true if there can be no `V` so that `V` is contained in both `self` and `other`.
     ///
     /// Note that we don't know that set of all existing `V`s here, so we only check if the segments
@@ -1286,6 +1357,66 @@ pub mod tests {
         any::<u32>()
     }
 
+    #[test]
+    fn difference_preserves_open_and_closed_bounds() {
+        let left = Ranges::from_range_bounds(1..=5);
+        let right = Ranges::from_range_bounds(2..4);
+        let expected = [(Included(1), Excluded(2)), (Included(4), Included(5))]
+            .into_iter()
+            .collect();
+
+        assert_eq!(left.difference(&right), expected);
+
+        let open: Ranges<u32> = [(Excluded(0), Excluded(1))].into_iter().collect();
+        assert_eq!(open.difference(&open), Ranges::empty());
+    }
+
+    #[test]
+    fn difference_handles_exclusions_spanning_multiple_segments() {
+        let left = Ranges::from_range_bounds(0..=2).union(&Ranges::from_range_bounds(4..=6));
+        let right = Ranges::from_range_bounds(1..=5);
+        let expected = [(Included(0), Excluded(1)), (Excluded(5), Included(6))]
+            .into_iter()
+            .collect();
+
+        assert_eq!(left.difference(&right), expected);
+    }
+
+    #[test]
+    fn difference_handles_equal_endpoint_inclusivity() {
+        for left_end in [Included(1), Excluded(1)] {
+            for right_start in [Included(1), Excluded(1)] {
+                let left: Ranges<u32> = [(Included(0), left_end)].into_iter().collect();
+                let right: Ranges<u32> = [(right_start, Included(2))].into_iter().collect();
+                let expected_end =
+                    if matches!(left_end, Included(_)) && matches!(right_start, Included(_)) {
+                        Excluded(1)
+                    } else {
+                        left_end
+                    };
+                let expected = [(Included(0), expected_end)].into_iter().collect();
+
+                assert_eq!(left.difference(&right), expected);
+            }
+        }
+
+        for left_start in [Included(1), Excluded(1)] {
+            for right_end in [Included(1), Excluded(1)] {
+                let left: Ranges<u32> = [(left_start, Included(2))].into_iter().collect();
+                let right: Ranges<u32> = [(Included(0), right_end)].into_iter().collect();
+                let expected_start =
+                    if matches!(left_start, Included(_)) && matches!(right_end, Included(_)) {
+                        Excluded(1)
+                    } else {
+                        left_start
+                    };
+                let expected = [(expected_start, Included(2))].into_iter().collect();
+
+                assert_eq!(left.difference(&right), expected);
+            }
+        }
+    }
+
     proptest! {
 
         // Testing serde ----------------------------------
@@ -1350,6 +1481,28 @@ pub mod tests {
         #[test]
         fn intesection_contains_both(r1 in proptest_strategy(), r2 in proptest_strategy(), version in version_strat()) {
             assert_eq!(r1.intersection(&r2).contains(&version), r1.contains(&version) && r2.contains(&version));
+        }
+
+        // Testing difference ------------------------------
+
+        #[test]
+        fn difference_matches_intersection_with_complement(r1 in proptest_strategy(), r2 in proptest_strategy()) {
+            assert_eq!(r1.difference(&r2), r2.complement().intersection(&r1));
+        }
+
+        #[test]
+        fn difference_contains_left_but_not_right(r1 in proptest_strategy(), r2 in proptest_strategy(), version in version_strat()) {
+            assert_eq!(r1.difference(&r2).contains(&version), r1.contains(&version) && !r2.contains(&version));
+        }
+
+        #[test]
+        fn difference_with_none_is_identity(range in proptest_strategy()) {
+            assert_eq!(range.difference(&Ranges::empty()), range);
+        }
+
+        #[test]
+        fn difference_with_self_is_none(range in proptest_strategy()) {
+            assert_eq!(range.difference(&range), Ranges::empty());
         }
 
         // Testing union -----------------------------------
