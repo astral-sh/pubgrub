@@ -505,12 +505,57 @@ mod dependency_merge_tests {
         assert_eq!(state.incompatibilities[&dependency].len(), 4);
     }
 
-    #[derive(Clone, Debug, Eq, PartialEq)]
-    struct CollidingRanges(Ranges<u32>);
+    #[test]
+    fn does_not_merge_dependencies_with_distinct_selection_metadata() {
+        let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
+            State::init("root", 0);
+        let package = state.package_store.alloc("package");
+
+        state.add_incompatibility_from_dependencies(
+            package,
+            1,
+            [("dependency", CollidingRanges::singleton(1))],
+        );
+        state.add_incompatibility_from_dependencies(
+            package,
+            2,
+            [("dependency", CollidingRanges::singleton(1).selected())],
+        );
+        state.add_incompatibility_from_dependencies(
+            package,
+            3,
+            [("dependency", CollidingRanges::singleton(1))],
+        );
+
+        let dependency = state.package_store.alloc("dependency");
+        assert_eq!(state.incompatibilities[&package].len(), 2);
+        assert_eq!(state.incompatibilities[&dependency].len(), 2);
+    }
+
+    #[derive(Clone, Debug)]
+    struct CollidingRanges {
+        versions: Ranges<u32>,
+        selected: bool,
+    }
+
+    impl CollidingRanges {
+        fn selected(mut self) -> Self {
+            self.selected = true;
+            self
+        }
+    }
+
+    impl PartialEq for CollidingRanges {
+        fn eq(&self, other: &Self) -> bool {
+            self.versions == other.versions
+        }
+    }
+
+    impl Eq for CollidingRanges {}
 
     impl Display for CollidingRanges {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            Display::fmt(&self.0, f)
+            Display::fmt(&self.versions, f)
         }
     }
 
@@ -524,23 +569,39 @@ mod dependency_merge_tests {
         type V = u32;
 
         fn empty() -> Self {
-            Self(Ranges::empty())
+            Self {
+                versions: Ranges::empty(),
+                selected: false,
+            }
         }
 
         fn singleton(v: Self::V) -> Self {
-            Self(Ranges::singleton(v))
+            Self {
+                versions: Ranges::singleton(v),
+                selected: false,
+            }
         }
 
         fn complement(&self) -> Self {
-            Self(self.0.complement())
+            Self {
+                versions: self.versions.complement(),
+                selected: self.selected,
+            }
         }
 
         fn intersection(&self, other: &Self) -> Self {
-            Self(self.0.intersection(&other.0))
+            Self {
+                versions: self.versions.intersection(&other.versions),
+                selected: self.selected || other.selected,
+            }
         }
 
         fn contains(&self, v: &Self::V) -> bool {
-            self.0.contains(v)
+            self.versions.contains(v)
+        }
+
+        fn selection_eq(&self, other: &Self) -> bool {
+            self == other && self.selected == other.selected
         }
     }
 }
