@@ -856,7 +856,7 @@ impl<V: Ord + Clone> Ranges<V> {
     /// A bound that excludes no existing version cannot influence which versions a set contains,
     /// so each segment can extend outward up to, and excluding, the nearest version outside the
     /// segment. For example, with the existing versions `1, 2, 3, 4`, the singleton `{2}` widens
-    /// to `(1, 3)`, and the union `{2} ∪ {3}` widens to `(1, ∞)`.
+    /// to `(1, 3)`, and the union `{2} ∪ {3}` widens to `(1, 4)`.
     ///
     /// The result is a superset of the input: For every one of the given versions, input and
     /// output agree on whether it is contained, while versions not in `versions` may be added,
@@ -892,13 +892,10 @@ impl<V: Ord + Clone> Ranges<V> {
                 Excluded(versions[not_above].borrow().clone())
             };
             // Merge with the previous segment unless a version separates them.
-            if let Some(last) = segments.last_mut() {
-                if !end_before_start_with_gap(&last.1, &start) {
-                    last.1 = end;
-                    continue;
-                }
+            match segments.last_mut() {
+                Some(last) if !end_before_start_with_gap(&last.1, &start) => last.1 = end,
+                _ => segments.push((start, end)),
             }
-            segments.push((start, end));
         }
         Self { segments }.check_invariants()
     }

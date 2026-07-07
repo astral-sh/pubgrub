@@ -29,7 +29,7 @@ fn resolve_with_widening(
         .packages()
         .map(|p| (*p, provider.versions(p).unwrap().copied().collect()))
         .collect();
-    let mut widened = 0u32;
+    let mut widened = false;
 
     let mut state: State<Provider> = State::init(root, version);
     let mut added_dependencies: Map<Id<&'static str>, BTreeSet<u32>> = Map::default();
@@ -81,15 +81,14 @@ fn resolve_with_widening(
                 }
                 Dependencies::Available(dependencies) => dependencies,
             };
+            let version_set = NumVS::singleton(decision);
             let versions = if widen {
-                let widened_versions = NumVS::singleton(decision)
-                    .widen_versions(versions.get(state.package_store[package]).unwrap());
-                if widened_versions != NumVS::singleton(decision) {
-                    widened += 1;
-                }
+                let widened_versions =
+                    version_set.widen_versions(versions.get(state.package_store[package]).unwrap());
+                widened |= widened_versions != version_set;
                 widened_versions
             } else {
-                NumVS::singleton(decision)
+                version_set
             };
             state.add_package_version_dependencies(package, decision, versions, dependencies);
         } else {
@@ -97,7 +96,7 @@ fn resolve_with_widening(
         }
     };
     if widen {
-        assert!(widened > 0, "no version set was ever widened");
+        assert!(widened, "no version set was ever widened");
     }
     Some(solution)
 }
