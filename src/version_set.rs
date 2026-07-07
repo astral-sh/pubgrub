@@ -102,6 +102,12 @@ pub trait VersionSet: Debug + Display + Clone + Eq + Hash {
     /// set must compare equal to `self` and must not be selection-equivalent to it. PubGrub stores
     /// the returned value directly; it does not need to be reproducible by [`Self::intersection`].
     ///
+    /// For a fixed version membership, refinements must compose associatively, commutatively, and
+    /// idempotently up to [`Self::selection_eq`]. Applying a collection of logically redundant
+    /// requirements in any order and any number of times must produce selection-equivalent
+    /// results. In particular, reapplying a requirement to the value it already refined must
+    /// return `None`.
+    ///
     /// The default assumes candidate selection depends only on version membership. Implementations
     /// whose logically redundant constraints can add candidate-selection metadata must override
     /// this method and [`VersionSet::may_refine_selection`].

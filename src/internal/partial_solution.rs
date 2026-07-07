@@ -428,6 +428,10 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         };
         debug_assert_eq!(refined, *current);
         debug_assert!(!refined.selection_eq(current));
+        debug_assert!(
+            refined.selection_refinement(requirement).is_none(),
+            "selection refinements must be idempotent"
+        );
         self.add_accumulated_derivation(package, cause, Term::Positive(refined));
         true
     }

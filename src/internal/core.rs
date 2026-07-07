@@ -81,9 +81,6 @@ pub struct State<DP: DependencyProvider> {
 
     /// Packages targeted by dependencies that can contribute candidate-selection metadata.
     selection_refinement_packages: Set<Id<DP::P>>,
-
-    /// Whether backtracking may have removed active candidate-selection refinements.
-    selection_refinements_dirty: bool,
 }
 
 impl<DP: DependencyProvider> State<DP> {
@@ -108,7 +105,6 @@ impl<DP: DependencyProvider> State<DP> {
             unit_propagation_buffer: SmallVec::Empty,
             merged_dependencies: MergedDependencies::default(),
             selection_refinement_packages: Set::default(),
-            selection_refinements_dirty: false,
         }
     }
 
@@ -223,6 +219,7 @@ impl<DP: DependencyProvider> State<DP> {
         package: Id<DP::P>,
     ) -> Result<SmallVec<(Id<DP::P>, IncompDpId<DP>)>, NoSolutionError<DP>> {
         let mut satisfier_causes = SmallVec::default();
+        let mut did_backtrack = false;
         self.unit_propagation_buffer.clear();
         self.unit_propagation_buffer.push(package);
         while let Some(current_package) = self.unit_propagation_buffer.pop() {
@@ -285,6 +282,7 @@ impl<DP: DependencyProvider> State<DP> {
                     .map_err(|terminal_incompat_id| {
                         self.build_derivation_tree(terminal_incompat_id)
                     })?;
+                did_backtrack = true;
                 self.unit_propagation_buffer.clear();
                 self.unit_propagation_buffer.push(package_almost);
                 // Add to the partial solution with incompat as cause.
@@ -299,7 +297,9 @@ impl<DP: DependencyProvider> State<DP> {
                     .mark_contradicted(&mut self.incompatibility_store[root_cause]);
             }
         }
-        self.refresh_selection_refinements();
+        if did_backtrack {
+            self.refresh_selection_refinements();
+        }
         // If there are no more changed packages, unit propagation is done.
         Ok(satisfier_causes)
     }
@@ -311,15 +311,14 @@ impl<DP: DependencyProvider> State<DP> {
     /// propagation can resume from an unrelated package, refresh every target that may carry
     /// selection metadata before the next priority or version decision.
     fn refresh_selection_refinements(&mut self) {
-        if !std::mem::take(&mut self.selection_refinements_dirty) {
-            return;
-        }
-
         for &package in &self.selection_refinement_packages {
             let Some(incompatibilities) = self.incompatibilities.get(&package) else {
                 continue;
             };
-            for &incompatibility in incompatibilities {
+            // Match unit propagation's newest-first traversal. Refinement composition is required
+            // to be order-independent, but keeping the replay order consistent also keeps the
+            // derivation trail deterministic.
+            for &incompatibility in incompatibilities.iter().rev() {
                 self.partial_solution.add_selection_derivation(
                     package,
                     incompatibility,
@@ -417,7 +416,6 @@ impl<DP: DependencyProvider> State<DP> {
         decision_level: DecisionLevel,
     ) {
         self.partial_solution.backtrack(decision_level);
-        self.selection_refinements_dirty = !self.selection_refinement_packages.is_empty();
         if incompat_changed {
             self.merge_incompatibility(incompat);
         }
@@ -432,7 +430,6 @@ impl<DP: DependencyProvider> State<DP> {
     pub fn backtrack_package(&mut self, package: Id<DP::P>) -> Option<u32> {
         let base_decision_level = self.partial_solution.current_decision_level();
         let new_decision_level = self.partial_solution.backtrack_package(package).ok()?;
-        self.selection_refinements_dirty = !self.selection_refinement_packages.is_empty();
         self.refresh_selection_refinements();
         Some(base_decision_level.get() - new_decision_level.get())
     }
@@ -603,7 +600,7 @@ mod dependency_merge_tests {
                     "parent",
                     CollidingRanges {
                         versions: Ranges::from_range_bounds(1u32..=2),
-                        selected: false,
+                        selection_markers: 0,
                     },
                 ),
             ],
@@ -618,7 +615,8 @@ mod dependency_merge_tests {
                 .term_intersection_for_package(dependency)
                 .unwrap()
                 .unwrap_positive()
-                .selected
+                .selection_markers
+                != 0
         };
         assert!(!is_selected(&state));
 
@@ -674,7 +672,8 @@ mod dependency_merge_tests {
                 .term_intersection_for_package(dependency)
                 .unwrap()
                 .unwrap_positive()
-                .selected
+                .selection_markers
+                != 0
         };
 
         // Decide the dependency target before discovering the parent's selection refinement.
@@ -700,15 +699,82 @@ mod dependency_merge_tests {
         assert!(is_selected(&state));
     }
 
+    #[test]
+    fn composes_multiple_selection_refinements_across_backtracking() {
+        let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
+            State::init("root", 0);
+        state.unit_propagation(state.root_package).unwrap();
+
+        state.add_package_version_dependencies(
+            state.root_package,
+            0,
+            [
+                ("dependency", CollidingRanges::singleton(1)),
+                ("first-parent", CollidingRanges::singleton(2)),
+                ("second-parent", CollidingRanges::singleton(3)),
+            ],
+        );
+        state.unit_propagation(state.root_package).unwrap();
+
+        let dependency = state.package_store.alloc("dependency");
+        let first_parent = state.package_store.alloc("first-parent");
+        let second_parent = state.package_store.alloc("second-parent");
+        let selection_markers =
+            |state: &State<OfflineDependencyProvider<&str, CollidingRanges>>| {
+                state
+                    .partial_solution
+                    .term_intersection_for_package(dependency)
+                    .unwrap()
+                    .unwrap_positive()
+                    .selection_markers
+            };
+
+        // Discover both metadata-bearing dependencies while the target is decided, so their
+        // refinements must be replayed after backtracking removes that decision.
+        state.add_package_version_dependencies(dependency, 1, []);
+        state.unit_propagation(dependency).unwrap();
+        state.add_package_version_dependencies(
+            first_parent,
+            2,
+            [(
+                "dependency",
+                CollidingRanges::singleton(1).selected_with(0b01),
+            )],
+        );
+        state.unit_propagation(first_parent).unwrap();
+        state.add_package_version_dependencies(
+            second_parent,
+            3,
+            [(
+                "dependency",
+                CollidingRanges::singleton(1).selected_with(0b10),
+            )],
+        );
+        state.unit_propagation(second_parent).unwrap();
+        assert_eq!(selection_markers(&state), 0);
+
+        assert_eq!(state.backtrack_package(dependency), Some(3));
+        assert_eq!(selection_markers(&state), 0b11);
+
+        // Reapplying the same active refinements through normal propagation is idempotent and
+        // cannot change the composed candidate-selection state.
+        state.unit_propagation(dependency).unwrap();
+        assert_eq!(selection_markers(&state), 0b11);
+    }
+
     #[derive(Clone, Debug)]
     struct CollidingRanges {
         versions: Ranges<u32>,
-        selected: bool,
+        selection_markers: u8,
     }
 
     impl CollidingRanges {
-        fn selected(mut self) -> Self {
-            self.selected = true;
+        fn selected(self) -> Self {
+            self.selected_with(1)
+        }
+
+        fn selected_with(mut self, marker: u8) -> Self {
+            self.selection_markers |= marker;
             self
         }
     }
@@ -739,21 +805,21 @@ mod dependency_merge_tests {
         fn empty() -> Self {
             Self {
                 versions: Ranges::empty(),
-                selected: false,
+                selection_markers: 0,
             }
         }
 
         fn singleton(v: Self::V) -> Self {
             Self {
                 versions: Ranges::singleton(v),
-                selected: false,
+                selection_markers: 0,
             }
         }
 
         fn complement(&self) -> Self {
             Self {
                 versions: self.versions.complement(),
-                selected: self.selected,
+                selection_markers: self.selection_markers,
             }
         }
 
@@ -762,7 +828,7 @@ mod dependency_merge_tests {
                 versions: self.versions.intersection(&other.versions),
                 // Candidate-selection refinements are applied explicitly below; ordinary set
                 // intersection intentionally preserves the left operand's metadata.
-                selected: self.selected,
+                selection_markers: self.selection_markers,
             }
         }
 
@@ -771,17 +837,17 @@ mod dependency_merge_tests {
         }
 
         fn selection_eq(&self, other: &Self) -> bool {
-            self == other && self.selected == other.selected
+            self == other && self.selection_markers == other.selection_markers
         }
 
         fn may_refine_selection(&self) -> bool {
-            self.selected
+            self.selection_markers != 0
         }
 
         fn selection_refinement(&self, requirement: &Self) -> Option<Self> {
             let refined = Self {
                 versions: self.versions.intersection(&requirement.versions),
-                selected: self.selected || requirement.selected,
+                selection_markers: self.selection_markers | requirement.selection_markers,
             };
             (self == &refined && !self.selection_eq(&refined)).then_some(refined)
         }
