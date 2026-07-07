@@ -184,11 +184,12 @@ impl<DP: DependencyProvider> State<DP> {
         deps: impl IntoIterator<Item = (DP::P, DP::VS)>,
     ) -> std::ops::Range<IncompDpId<DP>> {
         // Create incompatibilities and allocate them in the store.
-        let mut selection_refinement_packages: Set<Id<DP::P>> = Set::default();
+        let package_store = &mut self.package_store;
+        let selection_refinement_packages = &mut self.selection_refinement_packages;
         let new_incompats_id_range =
             self.incompatibility_store
                 .alloc_iter(deps.into_iter().map(|(dep_p, dep_vs)| {
-                    let dep_pid = self.package_store.alloc(dep_p);
+                    let dep_pid = package_store.alloc(dep_p);
                     if dep_vs.may_refine_selection() {
                         selection_refinement_packages.insert(dep_pid);
                     }
@@ -198,8 +199,6 @@ impl<DP: DependencyProvider> State<DP> {
                         (dep_pid, dep_vs),
                     )
                 }));
-        self.selection_refinement_packages
-            .extend(selection_refinement_packages);
         // Merge the newly created incompatibilities with the older ones.
         for id in IncompDpId::<DP>::range_to_iter(new_incompats_id_range.clone()) {
             self.merge_incompatibility(id);
@@ -220,6 +219,7 @@ impl<DP: DependencyProvider> State<DP> {
     ) -> Result<SmallVec<(Id<DP::P>, IncompDpId<DP>)>, NoSolutionError<DP>> {
         let mut satisfier_causes = SmallVec::default();
         let mut did_backtrack = false;
+        let has_selection_refinements = !self.selection_refinement_packages.is_empty();
         self.unit_propagation_buffer.clear();
         self.unit_propagation_buffer.push(package);
         while let Some(current_package) = self.unit_propagation_buffer.pop() {
@@ -228,11 +228,13 @@ impl<DP: DependencyProvider> State<DP> {
             let mut conflict_id = None;
             // We only care about incompatibilities if it contains the current package.
             for &incompat_id in self.incompatibilities[&current_package].iter().rev() {
-                self.partial_solution.add_selection_derivation(
-                    current_package,
-                    incompat_id,
-                    &self.incompatibility_store,
-                );
+                if has_selection_refinements {
+                    self.partial_solution.add_selection_derivation(
+                        current_package,
+                        incompat_id,
+                        &self.incompatibility_store,
+                    );
+                }
                 if self
                     .partial_solution
                     .is_contradicted(&self.incompatibility_store[incompat_id])
