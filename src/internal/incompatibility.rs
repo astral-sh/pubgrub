@@ -259,7 +259,9 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         }
         let dep_term = self.get(p2);
         // The dependency range for p2 must have the same logical membership and candidate
-        // selection behavior in both cases to be able to merge multiple p1 ranges.
+        // selection behavior in both cases to be able to merge multiple p1 ranges. The
+        // `VersionSet::selection_eq` congruence contract makes it safe to retain either range when
+        // later set operations add more constraints.
         let same_dependency = match (dep_term, other.get(p2)) {
             (Some(Term::Negative(left)), Some(Term::Negative(right))) => left.selection_eq(right),
             (None, None) => true,

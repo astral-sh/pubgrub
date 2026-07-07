@@ -50,14 +50,20 @@ pub trait VersionSet: Debug + Display + Clone + Eq + Hash {
     /// Whether the version is part of this set.
     fn contains(&self, v: &Self::V) -> bool;
 
-    /// Whether two logically equal sets are interchangeable for candidate selection.
+    /// Whether two sets have the same version membership and candidate-selection behavior.
     ///
     /// A version set may carry metadata that changes which contained version
     /// [`DependencyProvider::choose_version`](crate::DependencyProvider::choose_version) returns
     /// without changing the set's version membership. Dependency incompatibilities carrying
     /// different selection metadata must remain distinct even though the sets compare equal.
-    /// This method must return `false` for sets that do not compare equal, but may return `false`
-    /// for equal sets whose metadata would lead to different candidate selection.
+    ///
+    /// This method must be an equivalence relation, and returning `true` requires `self == other`.
+    /// It may return `false` for sets that compare equal when their selection metadata differs.
+    /// It must also be a congruence for every [`VersionSet`] operation: applying the same operation
+    /// to selection-equivalent operands must produce selection-equivalent results. Dependency
+    /// providers must treat selection-equivalent ranges as interchangeable in
+    /// [`DependencyProvider::prioritize`][crate::DependencyProvider::prioritize] and
+    /// [`DependencyProvider::choose_version`][crate::DependencyProvider::choose_version].
     fn selection_eq(&self, other: &Self) -> bool {
         self == other
     }
