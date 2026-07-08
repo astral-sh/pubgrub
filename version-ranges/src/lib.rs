@@ -884,8 +884,9 @@ impl<V: Ord + Clone> Ranges<V> {
             } else {
                 Excluded(versions[below - 1].borrow().clone())
             };
-            let not_above = versions
-                .partition_point(|v| within_bounds(v.borrow(), segment) != Ordering::Greater);
+            let not_above = below
+                + versions[below..]
+                    .partition_point(|v| within_bounds(v.borrow(), segment) != Ordering::Greater);
             let end = if not_above == versions.len() {
                 Unbounded
             } else {
@@ -929,8 +930,9 @@ impl<V: Ord + Clone> Ranges<V> {
             // The first and last version inside the segment become the new inclusive bounds.
             let first =
                 versions.partition_point(|v| within_bounds(v.borrow(), segment) == Ordering::Less);
-            let last = versions
-                .partition_point(|v| within_bounds(v.borrow(), segment) != Ordering::Greater);
+            let last = first
+                + versions[first..]
+                    .partition_point(|v| within_bounds(v.borrow(), segment) != Ordering::Greater);
             if first == last {
                 // The segment contains none of the versions, keep it unchanged.
                 segments.push(segment.clone());
