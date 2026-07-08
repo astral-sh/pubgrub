@@ -2,7 +2,7 @@
 
 Changelog for the version-ranges crate.
 
-## Unreleased
+## v0.2.1 - 2026-07-08
 
 ### Added
 
