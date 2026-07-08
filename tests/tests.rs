@@ -17,13 +17,14 @@ fn cloned_incompatibility_does_not_reuse_contradiction_cache() {
     base.add_package_version_dependencies(
         base.root_package,
         0,
+        Ranges::singleton(0u32),
         [("foo".to_string(), Ranges::full())],
     );
     base.unit_propagation(base.root_package).unwrap();
     let foo = base.package_store.alloc("foo".to_string());
 
     let mut source = base.clone();
-    source.add_package_version_dependencies(foo, 2, []);
+    source.add_package_version_dependencies(foo, 2, Ranges::singleton(2u32), []);
     source.add_incompatibility(Incompatibility::custom_version(
         foo,
         1,
@@ -34,7 +35,7 @@ fn cloned_incompatibility_does_not_reuse_contradiction_cache() {
     let incompatibility = source.incompatibility_store[incompatibility_id].clone();
 
     let mut target = base;
-    target.add_package_version_dependencies(foo, 1, []);
+    target.add_package_version_dependencies(foo, 1, Ranges::singleton(1u32), []);
     target.add_incompatibility(incompatibility);
 
     let conflicts = target.unit_propagation(foo).unwrap();
