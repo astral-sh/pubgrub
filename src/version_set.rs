@@ -69,6 +69,13 @@ pub trait VersionSet: Debug + Display + Clone + Eq + Hash {
             .complement()
     }
 
+    /// The set of versions that are in `self` but not in `other`.
+    ///
+    /// Implementations can override this to avoid materializing the complement.
+    fn difference(&self, other: &Self) -> Self {
+        self.intersection(&other.complement())
+    }
+
     /// Whether the ranges have no overlapping segments.
     fn is_disjoint(&self, other: &Self) -> bool {
         self.intersection(other) == Self::empty()
@@ -125,6 +132,10 @@ impl<T: Debug + Display + Clone + Eq + Ord + Hash> VersionSet for Ranges<T> {
 
     fn union(&self, other: &Self) -> Self {
         Ranges::union(self, other)
+    }
+
+    fn difference(&self, other: &Self) -> Self {
+        Ranges::difference(self, other)
     }
 
     fn is_disjoint(&self, other: &Self) -> bool {
