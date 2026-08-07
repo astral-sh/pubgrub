@@ -751,6 +751,7 @@ impl<V: Ord + Clone> Ranges<V> {
             loop {
                 // Drop right segments that end before the uncovered part starts: they cannot
                 // overlap it, nor any later left segment.
+                // Ensures left start < right end
                 while let Some((_, right_end)) = right_iter.peek() {
                     if valid_segment(&current_start, &right_end.as_ref()) {
                         break;
@@ -762,12 +763,14 @@ impl<V: Ord + Clone> Ranges<V> {
                     output.push((current_start.cloned(), left_end.clone()));
                     break;
                 };
+                // Ensures right start < left end
                 if !valid_segment(&right_start.as_ref(), &left_end.as_ref()) {
                     // The next right segment starts after this left segment ends.
                     output.push((current_start.cloned(), left_end.clone()));
                     break;
                 }
-                // The right segment overlaps the uncovered part; the piece below it survives.
+
+                // If left start < right start, left start to right start is the new segment.
                 if let Some(cut_end) = complement_bound(right_start) {
                     if valid_segment(&current_start, &cut_end) {
                         output.push((current_start.cloned(), cut_end.cloned()));
@@ -778,13 +781,16 @@ impl<V: Ord + Clone> Ranges<V> {
                     // left segment.
                     return Self { segments: output }.check_invariants();
                 };
+                // If right ends later, keep right for overlapping with future left segments,
+                // if left ends later, keep left for checking if it overlaps with future right
+                // segments.
                 if valid_segment(&next_start, &left_end.as_ref()) {
                     // Continue with the part of the left segment above the right segment.
                     current_start = next_start;
                     right_iter.next();
                 } else {
-                    // The uncovered part is exhausted, but the right segment may still overlap
-                    // the next left segment, so keep it.
+                    // The right segment overlaps the current left segment entirely, but this right
+                    // segment may also overlap the next left segment too, so keep it.
                     break;
                 }
             }
