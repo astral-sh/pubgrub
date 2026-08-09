@@ -81,16 +81,6 @@ impl<VS: VersionSet> Term<VS> {
             Self::Negative(set) => panic!("Negative term cannot unwrap positive set: {set:?}"),
         }
     }
-
-    /// Unwrap the set contained in a negative term.
-    ///
-    /// Panics if used on a positive set.
-    pub(crate) fn unwrap_negative(&self) -> &VS {
-        match self {
-            Self::Negative(set) => set,
-            Self::Positive(set) => panic!("Positive term cannot unwrap negative set: {set:?}"),
-        }
-    }
 }
 
 /// Set operations with terms.
@@ -256,6 +246,8 @@ impl<VS: VersionSet + Display> Display for Term<VS> {
 
 #[cfg(test)]
 pub mod tests {
+    use std::hash::{Hash, Hasher};
+
     use super::*;
     use proptest::prelude::*;
     use version_ranges::Ranges;
@@ -297,6 +289,79 @@ pub mod tests {
         }
     }
 
+    #[derive(Clone, Debug)]
+    struct SelectionRanges {
+        versions: Ranges<u32>,
+        selected: bool,
+    }
+
+    impl SelectionRanges {
+        fn with_selection(mut self) -> Self {
+            self.selected = true;
+            self
+        }
+    }
+
+    impl Display for SelectionRanges {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            Display::fmt(&self.versions, formatter)
+        }
+    }
+
+    impl PartialEq for SelectionRanges {
+        fn eq(&self, other: &Self) -> bool {
+            self.versions == other.versions
+        }
+    }
+
+    impl Eq for SelectionRanges {}
+
+    impl Hash for SelectionRanges {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.versions.hash(state);
+        }
+    }
+
+    impl VersionSet for SelectionRanges {
+        type V = u32;
+
+        fn empty() -> Self {
+            Self {
+                versions: Ranges::empty(),
+                selected: false,
+            }
+        }
+
+        fn singleton(version: Self::V) -> Self {
+            Self {
+                versions: Ranges::singleton(version),
+                selected: false,
+            }
+        }
+
+        fn complement(&self) -> Self {
+            Self {
+                versions: self.versions.complement(),
+                selected: self.selected,
+            }
+        }
+
+        fn intersection(&self, other: &Self) -> Self {
+            Self {
+                versions: self.versions.intersection(&other.versions),
+                selected: self.selected || other.selected,
+            }
+        }
+
+        fn contains(&self, version: &Self::V) -> bool {
+            self.versions.contains(version)
+        }
+
+        fn selection_eq(&self, other: &Self) -> bool {
+            self == other && self.selected == other.selected
+        }
+    }
+
     pub fn strategy() -> impl Strategy<Value = Term<Ranges<u32>>> {
         prop_oneof![
             version_ranges::proptest_strategy().prop_map(Term::Negative),
@@ -326,6 +391,66 @@ pub mod tests {
         assert!(matches!(
             Term::Negative(one).relation_with(&Term::Negative(two)),
             Relation::Inconclusive
+        ));
+    }
+
+    #[test]
+    fn equal_positive_ranges_ignore_selection_metadata() {
+        let plain = SelectionRanges::singleton(1);
+        let selected = plain.clone().with_selection();
+
+        assert!(matches!(
+            Term::Positive(selected.clone()).relation_with(&Term::Positive(plain)),
+            Relation::Satisfied
+        ));
+        assert!(matches!(
+            Term::Positive(selected).relation_with(&Term::Positive(
+                SelectionRanges::singleton(1).with_selection()
+            )),
+            Relation::Satisfied
+        ));
+    }
+
+    #[test]
+    fn strict_positive_subset_ignores_broader_selection_metadata() {
+        let active = SelectionRanges::singleton(1);
+        let requirement = SelectionRanges {
+            versions: Ranges::full(),
+            selected: true,
+        };
+
+        assert!(matches!(
+            Term::Positive(requirement).relation_with(&Term::Positive(active)),
+            Relation::Satisfied
+        ));
+    }
+
+    #[test]
+    fn equal_negative_ranges_ignore_selection_metadata() {
+        let plain = SelectionRanges::singleton(1);
+        let selected = plain.clone().with_selection();
+
+        assert!(matches!(
+            Term::Negative(selected.clone()).relation_with(&Term::Positive(plain)),
+            Relation::Contradicted
+        ));
+        assert!(matches!(
+            Term::Negative(SelectionRanges::singleton(1)).relation_with(&Term::Positive(selected)),
+            Relation::Contradicted
+        ));
+    }
+
+    #[test]
+    fn strict_negative_subset_ignores_broader_selection_metadata() {
+        let active = SelectionRanges::singleton(1);
+        let requirement = SelectionRanges {
+            versions: Ranges::full(),
+            selected: true,
+        };
+
+        assert!(matches!(
+            Term::Negative(requirement).relation_with(&Term::Positive(active)),
+            Relation::Contradicted
         ));
     }
 

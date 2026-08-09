@@ -497,6 +497,86 @@ mod dependency_merge_tests {
     use super::State;
 
     #[test]
+    fn selection_metadata_for_decided_dependency_does_not_derive() {
+        let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
+            State::init("root", 0);
+        let root = state.root_package;
+        state.unit_propagation(root).unwrap();
+        state.partial_solution.add_decision(root, 0);
+
+        state.add_incompatibility_from_dependencies(root, 0, [("b", CollidingRanges::full())]);
+        state.unit_propagation(root).unwrap();
+        let b = state.package_store.alloc("b");
+        state.partial_solution.add_decision(b, 0);
+
+        state.add_incompatibility_from_dependencies(root, 0, [("a", CollidingRanges::full())]);
+        state.unit_propagation(root).unwrap();
+        let a = state.package_store.alloc("a");
+        assert!(
+            state
+                .add_package_version_dependencies(
+                    a,
+                    0,
+                    [("b", CollidingRanges::full().with_selection(true))],
+                )
+                .is_none()
+        );
+
+        state.unit_propagation(a).unwrap();
+    }
+
+    #[test]
+    fn does_not_merge_dependencies_with_distinct_selection_metadata() {
+        let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
+            State::init("root", 0);
+        let package = state.package_store.alloc("package");
+        let plain = CollidingRanges::singleton(1);
+        let selected = plain.clone().with_selection(true);
+
+        assert_eq!(plain, selected);
+        assert!(!plain.selection_eq(&selected));
+
+        for (version, selected) in [(1, false), (2, true), (3, false)] {
+            state.add_incompatibility_from_dependencies(
+                package,
+                version,
+                [(
+                    "dependency",
+                    CollidingRanges::singleton(1).with_selection(selected),
+                )],
+            );
+        }
+
+        let dependency = state.package_store.alloc("dependency");
+        assert_eq!(state.incompatibilities[&package].len(), 2);
+        assert_eq!(state.incompatibilities[&dependency].len(), 2);
+    }
+
+    #[test]
+    fn merges_structurally_distinct_selection_equivalent_dependencies() {
+        let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
+            State::init("root", 0);
+        let package = state.package_store.alloc("package");
+        let selected = CollidingRanges::singleton(1).with_selection(true);
+        let alternate = selected.clone().with_representation(true);
+        let constraint = CollidingRanges::full();
+
+        assert!(selected.selection_eq(&alternate));
+        assert!(
+            selected
+                .intersection(&constraint)
+                .selection_eq(&alternate.intersection(&constraint))
+        );
+
+        state.add_incompatibility_from_dependencies(package, 1, [("dependency", selected)]);
+        state.add_incompatibility_from_dependencies(package, 2, [("dependency", alternate)]);
+
+        let dependency = state.package_store.alloc("dependency");
+        assert_eq!(state.incompatibilities[&package].len(), 1);
+        assert_eq!(state.incompatibilities[&dependency].len(), 1);
+    }
+
+    #[test]
     fn merge_dependencies_with_hash_collisions() {
         let mut state: State<OfflineDependencyProvider<&str, CollidingRanges>> =
             State::init("root", 0);
@@ -521,14 +601,38 @@ mod dependency_merge_tests {
         assert_eq!(state.incompatibilities[&dependency].len(), 4);
     }
 
-    #[derive(Clone, Debug, Eq, PartialEq)]
-    struct CollidingRanges(Ranges<u32>);
+    #[derive(Clone, Debug)]
+    struct CollidingRanges {
+        versions: Ranges<u32>,
+        selected: bool,
+        representation: bool,
+    }
+
+    impl CollidingRanges {
+        fn with_selection(mut self, selected: bool) -> Self {
+            self.selected = selected;
+            self
+        }
+
+        fn with_representation(mut self, representation: bool) -> Self {
+            self.representation = representation;
+            self
+        }
+    }
 
     impl Display for CollidingRanges {
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            Display::fmt(&self.0, f)
+            Display::fmt(&self.versions, f)
         }
     }
+
+    impl PartialEq for CollidingRanges {
+        fn eq(&self, other: &Self) -> bool {
+            self.versions == other.versions
+        }
+    }
+
+    impl Eq for CollidingRanges {}
 
     impl Hash for CollidingRanges {
         fn hash<H: Hasher>(&self, state: &mut H) {
@@ -540,23 +644,43 @@ mod dependency_merge_tests {
         type V = u32;
 
         fn empty() -> Self {
-            Self(Ranges::empty())
+            Self {
+                versions: Ranges::empty(),
+                selected: false,
+                representation: false,
+            }
         }
 
         fn singleton(v: Self::V) -> Self {
-            Self(Ranges::singleton(v))
+            Self {
+                versions: Ranges::singleton(v),
+                selected: false,
+                representation: false,
+            }
         }
 
         fn complement(&self) -> Self {
-            Self(self.0.complement())
+            Self {
+                versions: self.versions.complement(),
+                selected: self.selected,
+                representation: self.representation,
+            }
         }
 
         fn intersection(&self, other: &Self) -> Self {
-            Self(self.0.intersection(&other.0))
+            Self {
+                versions: self.versions.intersection(&other.versions),
+                selected: self.selected || other.selected,
+                representation: self.representation,
+            }
         }
 
         fn contains(&self, v: &Self::V) -> bool {
-            self.0.contains(v)
+            self.versions.contains(v)
+        }
+
+        fn selection_eq(&self, other: &Self) -> bool {
+            self == other && self.selected == other.selected
         }
     }
 }

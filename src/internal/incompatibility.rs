@@ -229,10 +229,10 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         }
     }
 
-    /// Merge dependant versions with the same dependency.
+    /// Merge dependent versions with interchangeable dependencies.
     ///
-    /// When multiple versions of a package depend on the same range of another package,
-    /// we can merge the two into a single incompatibility.
+    /// When multiple versions of a package depend on the same range of another package with the
+    /// same candidate-selection behavior, we can merge the two into a single incompatibility.
     /// For example, if a@1 depends on b and a@2 depends on b, we can say instead
     /// a@1||2 depends on b.
     ///
@@ -244,8 +244,8 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         debug_assert!(dependency.is_some());
         // Check that both incompatibilities are of the shape p1 depends on p2,
         // with the same p1 and p2.
-        let (p1, p2, _) = dependency?;
-        let (other_p1, other_p2, _) = other.as_dependency()?;
+        let (p1, p2, dependency_range) = dependency?;
+        let (other_p1, other_p2, other_dependency_range) = other.as_dependency()?;
         if (p1, p2) != (other_p1, other_p2) {
             return None;
         }
@@ -257,10 +257,16 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         if p1 == p2 {
             return None;
         }
-        let dep_term = self.get(p2);
         // The dependency range for p2 must be the same in both case
         // to be able to merge multiple p1 ranges.
-        if dep_term != other.get(p2) {
+        let same_dependency = match (dependency_range, other_dependency_range) {
+            (Some(dependency_range), Some(other_dependency_range)) => {
+                dependency_range.selection_eq(other_dependency_range)
+            }
+            (None, None) => true,
+            (Some(_), None) | (None, Some(_)) => false,
+        };
+        if !same_dependency {
             return None;
         }
         Some(Self::from_dependency(
@@ -269,10 +275,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 .unwrap()
                 .unwrap_positive()
                 .union(other.get(p1).unwrap().unwrap_positive()), // It is safe to `simplify` here
-            (
-                p2,
-                dep_term.map_or(VS::empty(), |v| v.unwrap_negative().clone()),
-            ),
+            (p2, dependency_range.cloned().unwrap_or_else(VS::empty)),
         ))
     }
 

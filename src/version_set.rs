@@ -27,6 +27,18 @@ use crate::{Ranges, SetRelation};
 /// is about upholding the mathematical properties of set operations, assuming all versions are
 /// possible. This is required for the solver to determine the relationship of version sets to each
 /// other.
+///
+/// # Candidate-selection metadata
+///
+/// A version set may carry metadata that affects how a
+/// [`DependencyProvider`][crate::DependencyProvider] chooses between versions without affecting
+/// which versions the set contains. This metadata must not participate in [`Eq`] or [`Hash`], which
+/// remain defined by version membership. Instead, implementations must override
+/// [`VersionSet::selection_eq`] when candidate selection depends on such metadata.
+/// PubGrub treats the metadata as opaque: implementations are responsible for propagating it
+/// through set operations into the values passed to the dependency provider. PubGrub uses the
+/// metadata only to avoid compacting dependencies with different selection behavior; it does not
+/// propagate metadata from a constraint that is already satisfied by version membership.
 pub trait VersionSet: Debug + Display + Clone + Eq + Hash {
     /// Version type associated with the sets manipulated.
     type V: Debug + Display + Clone + Ord;
@@ -49,6 +61,24 @@ pub trait VersionSet: Debug + Display + Clone + Eq + Hash {
 
     /// Whether the version is part of this set.
     fn contains(&self, v: &Self::V) -> bool;
+
+    /// Whether two sets have the same version membership and candidate-selection behavior.
+    ///
+    /// PubGrub uses this method when deciding whether dependency constraints can be merged without
+    /// changing the candidates chosen by the dependency provider. The default assumes candidate
+    /// selection depends only on version membership. Implementations that carry additional
+    /// selection metadata must override it.
+    ///
+    /// This method must be an equivalence relation, and returning `true` requires `self == other`.
+    /// It may return `false` for sets that compare equal when their selection metadata differs.
+    /// It must also be a congruence for every [`VersionSet`] operation: applying the same operation
+    /// to selection-equivalent operands must produce selection-equivalent results. Dependency
+    /// providers must treat selection-equivalent ranges as interchangeable in
+    /// [`DependencyProvider::prioritize`][crate::DependencyProvider::prioritize] and
+    /// [`DependencyProvider::choose_version`][crate::DependencyProvider::choose_version].
+    fn selection_eq(&self, other: &Self) -> bool {
+        self == other
+    }
 
     // Automatically implemented functions
 
