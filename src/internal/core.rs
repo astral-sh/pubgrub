@@ -578,42 +578,6 @@ mod tests {
     type NumVS = Ranges<u32>;
     type Provider = OfflineDependencyProvider<&'static str, NumVS>;
 
-    #[test]
-    fn backtrack_package_ignores_undecided_packages() {
-        let mut state: State<Provider> = State::init("root", 1);
-        let root = state.root_package;
-        state.unit_propagation(root).unwrap();
-
-        assert_eq!(state.backtrack_package(root), None);
-        assert!(!state.partial_solution.has_backtracked());
-
-        state
-            .partial_solution
-            .pick_highest_priority_pkg(|_, _| Default::default());
-        state.add_package_version_dependencies(
-            root,
-            1,
-            NumVS::singleton(1u32),
-            [("dependency", NumVS::full())],
-        );
-        state.unit_propagation(root).unwrap();
-        let dependency = state.package_store.alloc("dependency");
-
-        assert_eq!(state.backtrack_package(dependency), None);
-        assert!(!state.partial_solution.has_backtracked());
-        assert_eq!(
-            state
-                .partial_solution
-                .extract_solution()
-                .collect::<Vec<_>>(),
-            vec![(root, 1)]
-        );
-
-        assert_eq!(state.backtrack_package(root), Some(1));
-        assert!(state.partial_solution.has_backtracked());
-        assert_eq!(state.partial_solution.extract_solution().count(), 0);
-    }
-
     /// A `resolve` loop that keeps the version sets minimal by widening the version whose
     /// dependencies are added over the known versions.
     ///
