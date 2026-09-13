@@ -234,8 +234,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         // It is almost certainly a bug to call this method without checking that self is a dependency
         let dependency = self.as_dependency();
         debug_assert!(dependency.is_some());
-        // Check that both incompatibilities are of the shape p1 depends on p2,
-        // with the same p1 and p2.
+        // Check that both incompatibilities have the same dependent and dependency packages.
         let dependency = dependency?;
         let other_dependency = other.as_dependency()?;
         if (dependency.dependent, dependency.dependency)
@@ -251,8 +250,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         if dependency.dependent == dependency.dependency {
             return None;
         }
-        // The dependency range for p2 must be the same in both case
-        // to be able to merge multiple p1 ranges.
+        // Only merge dependent version ranges with the same dependency range.
         if dependency.dependency_versions != other_dependency.dependency_versions {
             return None;
         }
