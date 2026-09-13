@@ -192,7 +192,7 @@ impl<DP: DependencyProvider> State<DP> {
         ));
     }
 
-    /// Iterate over the known incoming and outgoing dependencies of a package in solver order.
+    /// Iterate over the known incoming and outgoing dependencies of a package.
     ///
     /// Dependent versions with the same dependency range may be merged. Learned
     /// incompatibilities and unavailable-version reasons are excluded.
@@ -207,7 +207,7 @@ impl<DP: DependencyProvider> State<DP> {
             .filter_map(|&id| self.incompatibility_store[id].dependency())
     }
 
-    /// Iterate over the packages participating in a conflict, in solver order.
+    /// Iterate over the packages participating in a conflict.
     pub fn conflict_packages(&self, conflict: ConflictId<DP>) -> impl Iterator<Item = Id<DP::P>> {
         self.incompatibility_store[conflict.0]
             .iter()
