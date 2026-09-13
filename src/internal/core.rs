@@ -8,10 +8,41 @@ use std::hash::{BuildHasher, Hash};
 use std::sync::Arc;
 
 use crate::internal::{
-    Arena, DecisionLevel, HashArena, Id, IncompDpId, IncompId, Incompatibility, PartialSolution,
-    Relation, SatisfierSearch, SmallVec,
+    Arena, DecisionLevel, HashArena, Id, IncompDpId, Incompatibility, PartialSolution, Relation,
+    SatisfierSearch, SmallVec,
 };
-use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, Package, VersionSet};
+use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, Package, Term, VersionSet};
+
+/// An opaque handle to a conflict recorded by a solver state.
+///
+/// Use [`State::conflict_packages`] to inspect the participating packages. A handle belongs to
+/// the state that produced it and must not be used with an independently initialized state or
+/// a fork cloned before the conflict was recorded.
+#[derive(Debug)]
+pub struct ConflictId<DP: DependencyProvider>(IncompDpId<DP>);
+
+impl<DP: DependencyProvider> Copy for ConflictId<DP> {}
+
+impl<DP: DependencyProvider> Clone for ConflictId<DP> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+/// A dependency constraint recorded by a solver state.
+///
+/// This describes a known dependency, which need not be active in the current partial solution.
+#[derive(Debug)]
+pub struct Dependency<'a, P, VS> {
+    /// The package declaring the dependency.
+    pub dependent: Id<P>,
+    /// The versions of the dependent package sharing this dependency.
+    pub dependent_versions: &'a VS,
+    /// The required package.
+    pub dependency: Id<P>,
+    /// The required versions, or `None` if the dependency range is empty.
+    pub dependency_versions: Option<&'a VS>,
+}
 
 #[derive(Clone)]
 struct MergedDependencies<P: Package, I> {
@@ -60,7 +91,7 @@ pub struct State<DP: DependencyProvider> {
 
     /// All incompatibilities indexed by package.
     #[allow(clippy::type_complexity)]
-    pub incompatibilities: Map<Id<DP::P>, Vec<IncompDpId<DP>>>,
+    incompatibilities: Map<Id<DP::P>, Vec<IncompDpId<DP>>>,
 
     /// All incompatibilities expressing dependencies, with common dependents merged.
     merged_dependencies: MergedDependencies<DP::P, IncompDpId<DP>>,
@@ -69,7 +100,7 @@ pub struct State<DP: DependencyProvider> {
     pub partial_solution: PartialSolution<DP>,
 
     /// The store is the reference storage for all incompatibilities.
-    pub incompatibility_store: Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
+    pub(crate) incompatibility_store: Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
 
     /// The store is the reference storage for all packages.
     pub package_store: HashArena<DP::P>,
@@ -126,23 +157,73 @@ impl<DP: DependencyProvider> State<DP> {
         version: DP::V,
         versions: DP::VS,
         dependencies: impl IntoIterator<Item = (DP::P, DP::VS)>,
-    ) -> Option<IncompId<DP::P, DP::VS, DP::M>> {
+    ) -> Option<ConflictId<DP>> {
         debug_assert!(
             versions.contains(&version),
             "the version being decided must be in the version set sharing its dependencies",
         );
         let dep_incompats =
             self.add_incompatibility_from_dependencies(package, versions, dependencies);
-        self.partial_solution.add_package_version_incompatibilities(
-            package,
-            version,
-            dep_incompats,
-            &self.incompatibility_store,
-        )
+        self.partial_solution
+            .add_package_version_incompatibilities(
+                package,
+                version,
+                dep_incompats,
+                &self.incompatibility_store,
+            )
+            .map(ConflictId)
+    }
+
+    /// Record that no available version satisfies a positive term.
+    pub fn add_no_versions(&mut self, package: Id<DP::P>, term: Term<DP::VS>) {
+        self.add_incompatibility(Incompatibility::no_versions(package, term));
+    }
+
+    /// Record that a positive term is unavailable for a reason outside the solver.
+    pub fn add_unavailable(&mut self, package: Id<DP::P>, term: Term<DP::VS>, reason: DP::M) {
+        self.add_incompatibility(Incompatibility::custom_term(package, term, reason));
+    }
+
+    /// Record a dependency constraint without deciding a package version.
+    pub fn add_dependency(
+        &mut self,
+        package: Id<DP::P>,
+        versions: DP::VS,
+        dependency: (Id<DP::P>, DP::VS),
+    ) {
+        self.add_incompatibility(Incompatibility::from_dependency(
+            package, versions, dependency,
+        ));
+    }
+
+    /// Iterate over the known incoming and outgoing dependencies of a package in solver order.
+    ///
+    /// Dependent versions with the same dependency range may be merged. Learned
+    /// incompatibilities and unavailable-version reasons are excluded. The caller must check
+    /// the version ranges when looking for dependencies active in a particular solution.
+    pub fn dependencies(
+        &self,
+        package: Id<DP::P>,
+    ) -> impl Iterator<Item = Dependency<'_, DP::P, DP::VS>> {
+        self.incompatibilities
+            .get(&package)
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter_map(|&id| self.incompatibility_store[id].dependency())
+    }
+
+    /// Iterate over the packages participating in a conflict, in solver order.
+    pub fn conflict_packages(&self, conflict: ConflictId<DP>) -> impl Iterator<Item = Id<DP::P>> {
+        self.incompatibility_store[conflict.0]
+            .iter()
+            .map(|(package, _)| package)
     }
 
     /// Add an incompatibility to the state.
-    pub fn add_incompatibility(&mut self, mut incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
+    pub(crate) fn add_incompatibility(
+        &mut self,
+        mut incompat: Incompatibility<DP::P, DP::VS, DP::M>,
+    ) {
         // Cached contradictions are only valid in the state that recorded them.
         incompat.reset_contradiction_cache();
         let id = self.incompatibility_store.alloc(incompat);
@@ -208,14 +289,15 @@ impl<DP: DependencyProvider> State<DP> {
     /// Unit propagation is the core mechanism of the solving algorithm.
     /// CF <https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation>
     ///
-    /// For each package with a satisfied incompatibility, returns the package and the root cause
-    /// incompatibility.
+    /// For each package with a satisfied incompatibility, returns the package and a handle to
+    /// the root cause conflict.
     #[cold]
     #[allow(clippy::type_complexity)] // Type definitions don't support impl trait.
     pub fn unit_propagation(
         &mut self,
         package: Id<DP::P>,
-    ) -> Result<SmallVec<(Id<DP::P>, IncompDpId<DP>)>, NoSolutionError<DP>> {
+    ) -> Result<impl IntoIterator<Item = (Id<DP::P>, ConflictId<DP>)> + use<DP>, NoSolutionError<DP>>
+    {
         let mut satisfier_causes = SmallVec::default();
         self.unit_propagation_buffer.clear();
         self.unit_propagation_buffer.push(package);
@@ -289,7 +371,9 @@ impl<DP: DependencyProvider> State<DP> {
             }
         }
         // If there are no more changed packages, unit propagation is done.
-        Ok(satisfier_causes)
+        Ok(satisfier_causes
+            .into_iter()
+            .map(|(package, id)| (package, ConflictId(id))))
     }
 
     /// Return the root cause or the terminal incompatibility. CF
@@ -763,7 +847,14 @@ mod tests {
             1,
             "foo 1 is unavailable".to_string(),
         ));
-        assert!(source.unit_propagation(foo).unwrap().is_empty());
+        assert!(
+            source
+                .unit_propagation(foo)
+                .unwrap()
+                .into_iter()
+                .next()
+                .is_none()
+        );
         let incompatibility_id = *source.incompatibilities[&foo].last().unwrap();
         let incompatibility = source.incompatibility_store[incompatibility_id].clone();
 
@@ -772,6 +863,6 @@ mod tests {
         target.add_incompatibility(incompatibility);
 
         let conflicts = target.unit_propagation(foo).unwrap();
-        assert!(!conflicts.is_empty());
+        assert!(conflicts.into_iter().next().is_some());
     }
 }
