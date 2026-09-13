@@ -11,7 +11,7 @@ use crate::internal::{
     Arena, DecisionLevel, HashArena, Id, IncompDpId, Incompatibility, PartialSolution, Relation,
     SatisfierSearch, SmallVec,
 };
-use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, Package, Term, VersionSet};
+use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, Package, VersionSet};
 
 /// An opaque handle to a conflict recorded by solver state.
 #[derive(Copy, Clone, Debug)]
@@ -47,17 +47,15 @@ impl<P: Package, I> Default for MergedDependencies<P, I> {
 }
 
 impl<P: Package, I> MergedDependencies<P, I> {
-    fn bucket(
-        &mut self,
-        dependent: Id<P>,
-        dependency: Id<P>,
-        range: &impl Hash,
-    ) -> &mut SmallVec<I> {
-        let range_hash = self.buckets.hasher().hash_one(range);
+    fn bucket<VS: VersionSet>(&mut self, dependency: Dependency<P, VS>) -> &mut SmallVec<I> {
+        let range_hash = self
+            .buckets
+            .hasher()
+            .hash_one(dependency.dependency_versions);
         self.buckets
             .entry(DependencyKey {
-                dependent,
-                dependency,
+                dependent: dependency.dependent,
+                dependency: dependency.dependency,
                 range_hash,
             })
             .or_default()
@@ -89,7 +87,7 @@ pub struct State<DP: DependencyProvider> {
     pub partial_solution: PartialSolution<DP>,
 
     /// The store is the reference storage for all incompatibilities.
-    pub(crate) incompatibility_store: Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
+    incompatibility_store: Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
 
     /// The store is the reference storage for all packages.
     pub package_store: HashArena<DP::P>,
@@ -165,19 +163,12 @@ impl<DP: DependencyProvider> State<DP> {
 
     /// Record that no available version satisfies a version range.
     pub fn add_no_versions(&mut self, package: Id<DP::P>, versions: DP::VS) {
-        self.add_incompatibility(Incompatibility::no_versions(
-            package,
-            Term::Positive(versions),
-        ));
+        self.add_incompatibility(Incompatibility::no_versions(package, versions));
     }
 
     /// Record that a version range is unavailable for a reason outside the solver.
     pub fn add_unavailable(&mut self, package: Id<DP::P>, versions: DP::VS, reason: DP::M) {
-        self.add_incompatibility(Incompatibility::custom_term(
-            package,
-            Term::Positive(versions),
-            reason,
-        ));
+        self.add_incompatibility(Incompatibility::custom(package, versions, reason));
     }
 
     /// Record a dependency constraint without deciding a package version.
@@ -208,17 +199,14 @@ impl<DP: DependencyProvider> State<DP> {
     }
 
     /// Iterate over the packages participating in a conflict.
-    pub fn conflict_packages(&self, conflict: ConflictId<DP>) -> impl Iterator<Item = Id<DP::P>> {
+    pub fn conflict_packages(&self, conflict: &ConflictId<DP>) -> impl Iterator<Item = Id<DP::P>> {
         self.incompatibility_store[conflict.0]
             .iter()
             .map(|(package, _)| package)
     }
 
     /// Add an incompatibility to the state.
-    pub(crate) fn add_incompatibility(
-        &mut self,
-        mut incompat: Incompatibility<DP::P, DP::VS, DP::M>,
-    ) {
+    fn add_incompatibility(&mut self, mut incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
         // Cached contradictions are only valid in the state that recorded them.
         incompat.reset_contradiction_cache();
         let id = self.incompatibility_store.alloc(incompat);
@@ -239,29 +227,18 @@ impl<DP: DependencyProvider> State<DP> {
     ///
     /// Using this method requires that each version of the proxy package depends on the exact
     /// same version of the base package.
-    #[allow(unused)]
     pub fn add_proxy_package_incompatibility(
         &mut self,
         proxy_package: Id<DP::P>,
         base_package: Id<DP::P>,
         versions: DP::VS,
     ) {
-        let incompat = Incompatibility::from_dependency(
-            proxy_package,
-            versions.clone(),
-            (base_package, versions),
-        );
-        let id = self
-            .incompatibility_store
-            .alloc_iter([incompat].into_iter());
-        for id in IncompDpId::<DP>::range_to_iter(id) {
-            self.merge_incompatibility(id);
-        }
+        self.add_dependency(proxy_package, versions.clone(), (base_package, versions));
     }
 
     /// Add an incompatibility to the state.
     #[cold]
-    pub(crate) fn add_incompatibility_from_dependencies(
+    fn add_incompatibility_from_dependencies(
         &mut self,
         package: Id<DP::P>,
         versions: DP::VS,
@@ -496,11 +473,7 @@ impl<DP: DependencyProvider> State<DP> {
             // Self-dependencies cannot be merged.
             && dependency.dependent != dependency.dependency
         {
-            let deps_lookup = self.merged_dependencies.bucket(
-                dependency.dependent,
-                dependency.dependency,
-                &dependency.dependency_versions,
-            );
+            let deps_lookup = self.merged_dependencies.bucket(dependency);
             if let Some((past, merged)) = deps_lookup.as_mut_slice().iter_mut().find_map(|past| {
                 self.incompatibility_store[id]
                     .merge_dependents(&self.incompatibility_store[*past])
@@ -650,10 +623,10 @@ mod tests {
     use std::collections::BTreeMap;
     use std::collections::BTreeSet;
 
-    use crate::internal::{Id, Incompatibility, State};
+    use crate::internal::{Id, State};
     use crate::{
         Dependencies, DependencyProvider, Map, OfflineDependencyProvider,
-        PackageResolutionStatistics, Ranges, Term,
+        PackageResolutionStatistics, Ranges,
     };
 
     type NumVS = Ranges<u32>;
@@ -703,11 +676,8 @@ mod tests {
                 .choose_version(&state.package_store[package], term_intersection)
                 .unwrap()
             else {
-                let inc = Incompatibility::no_versions(
-                    package,
-                    Term::Positive(term_intersection.clone()),
-                );
-                state.add_incompatibility(inc);
+                let versions = term_intersection.clone();
+                state.add_no_versions(package, versions);
                 continue;
             };
 
@@ -721,9 +691,7 @@ mod tests {
                     .unwrap()
                 {
                     Dependencies::Unavailable(reason) => {
-                        state.add_incompatibility(Incompatibility::custom_version(
-                            package, decision, reason,
-                        ));
+                        state.add_unavailable(package, NumVS::singleton(decision), reason);
                         continue;
                     }
                     Dependencies::Available(dependencies) => dependencies,
@@ -839,11 +807,11 @@ mod tests {
 
         let mut source = base.clone();
         source.add_package_version_dependencies(foo, 2, Ranges::singleton(2u32), []);
-        source.add_incompatibility(Incompatibility::custom_version(
+        source.add_unavailable(
             foo,
-            1,
+            NumVS::singleton(1u32),
             "foo 1 is unavailable".to_string(),
-        ));
+        );
         assert!(
             source
                 .unit_propagation(foo)
