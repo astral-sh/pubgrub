@@ -174,14 +174,21 @@ impl<DP: DependencyProvider> State<DP> {
             .map(ConflictId)
     }
 
-    /// Record that no available version satisfies a positive term.
-    pub fn add_no_versions(&mut self, package: Id<DP::P>, term: Term<DP::VS>) {
-        self.add_incompatibility(Incompatibility::no_versions(package, term));
+    /// Record that no available version satisfies a version range.
+    pub fn add_no_versions(&mut self, package: Id<DP::P>, versions: DP::VS) {
+        self.add_incompatibility(Incompatibility::no_versions(
+            package,
+            Term::Positive(versions),
+        ));
     }
 
-    /// Record that a positive term is unavailable for a reason outside the solver.
-    pub fn add_unavailable(&mut self, package: Id<DP::P>, term: Term<DP::VS>, reason: DP::M) {
-        self.add_incompatibility(Incompatibility::custom_term(package, term, reason));
+    /// Record that a version range is unavailable for a reason outside the solver.
+    pub fn add_unavailable(&mut self, package: Id<DP::P>, versions: DP::VS, reason: DP::M) {
+        self.add_incompatibility(Incompatibility::custom_term(
+            package,
+            Term::Positive(versions),
+            reason,
+        ));
     }
 
     /// Record a dependency constraint without deciding a package version.
