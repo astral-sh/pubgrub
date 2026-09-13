@@ -294,10 +294,6 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         };
     }
 
-    pub(crate) fn reset_contradiction_cache(&mut self) {
-        self.contradiction_cache = ContradictionCache::not_contradicted();
-    }
-
     /// Check if an incompatibility should mark the end of the algorithm
     /// because it satisfies the root package.
     pub(crate) fn is_terminal(&self, root_package: Id<P>, root_version: &VS::V) -> bool {

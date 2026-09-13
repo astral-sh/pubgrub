@@ -206,34 +206,9 @@ impl<DP: DependencyProvider> State<DP> {
     }
 
     /// Add an incompatibility to the state.
-    fn add_incompatibility(&mut self, mut incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
-        // Cached contradictions are only valid in the state that recorded them.
-        incompat.reset_contradiction_cache();
+    fn add_incompatibility(&mut self, incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
         let id = self.incompatibility_store.alloc(incompat);
         self.merge_incompatibility(id);
-    }
-
-    /// Add a single custom incompatibility that requires that the base package and the proxy
-    /// package share the same version range.
-    ///
-    /// This intended for cases where proxy packages (also known as virtual packages) are used.
-    /// Without this information, pubgrub does not know that these packages have to be at the same
-    /// version. In cases where the base package is already set to an incompatible version, this
-    /// avoids going through all versions of the proxy package. In cases where there are two
-    /// incompatible proxy packages, it avoids trying versions for both of them. This improves both
-    /// performance (we don't need to check all versions when there is a conflict) and error
-    /// messages (report a conflict of version ranges instead of enumerating the conflicting
-    /// versions).
-    ///
-    /// Using this method requires that each version of the proxy package depends on the exact
-    /// same version of the base package.
-    pub fn add_proxy_package_incompatibility(
-        &mut self,
-        proxy_package: Id<DP::P>,
-        base_package: Id<DP::P>,
-        versions: DP::VS,
-    ) {
-        self.add_dependency(proxy_package, versions.clone(), (base_package, versions));
     }
 
     /// Add an incompatibility to the state.
@@ -788,46 +763,5 @@ mod tests {
         let dependency = state.package_store.alloc("dependency");
         assert_eq!(state.incompatibilities[&package].len(), 4);
         assert_eq!(state.incompatibilities[&dependency].len(), 4);
-    }
-
-    #[test]
-    fn cloned_incompatibility_does_not_reuse_contradiction_cache() {
-        type Provider = OfflineDependencyProvider<String, NumVS>;
-
-        let mut base: State<Provider> = State::init("root".to_string(), 0);
-        base.unit_propagation(base.root_package).unwrap();
-        base.add_package_version_dependencies(
-            base.root_package,
-            0,
-            Ranges::singleton(0u32),
-            [("foo".to_string(), Ranges::full())],
-        );
-        base.unit_propagation(base.root_package).unwrap();
-        let foo = base.package_store.alloc("foo".to_string());
-
-        let mut source = base.clone();
-        source.add_package_version_dependencies(foo, 2, Ranges::singleton(2u32), []);
-        source.add_unavailable(
-            foo,
-            NumVS::singleton(1u32),
-            "foo 1 is unavailable".to_string(),
-        );
-        assert!(
-            source
-                .unit_propagation(foo)
-                .unwrap()
-                .into_iter()
-                .next()
-                .is_none()
-        );
-        let incompatibility_id = *source.incompatibilities[&foo].last().unwrap();
-        let incompatibility = source.incompatibility_store[incompatibility_id].clone();
-
-        let mut target = base;
-        target.add_package_version_dependencies(foo, 1, Ranges::singleton(1u32), []);
-        target.add_incompatibility(incompatibility);
-
-        let conflicts = target.unit_propagation(foo).unwrap();
-        assert!(conflicts.into_iter().next().is_some());
     }
 }
