@@ -13,25 +13,14 @@ use crate::internal::{
 };
 use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, Package, Term, VersionSet};
 
-/// An opaque handle to a conflict recorded by a solver state.
-///
-/// Use [`State::conflict_packages`] to inspect the participating packages. A handle belongs to
-/// the state that produced it and must not be used with an independently initialized state or
-/// a fork cloned before the conflict was recorded.
-#[derive(Debug)]
+/// An opaque handle to a conflict recorded by solver state.
+#[derive(Copy, Clone, Debug)]
 pub struct ConflictId<DP: DependencyProvider>(IncompDpId<DP>);
 
-impl<DP: DependencyProvider> Copy for ConflictId<DP> {}
-
-impl<DP: DependencyProvider> Clone for ConflictId<DP> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-/// A dependency constraint recorded by a solver state.
+/// A dependency constraint from one package (dependent) onto another (dependency).
 ///
-/// This describes a known dependency, which need not be active in the current partial solution.
+/// This may merge overlapping constraints from multiple dependent versions, hence the version
+/// range for dependent.
 #[derive(Debug)]
 pub struct Dependency<'a, P, VS> {
     /// The package declaring the dependency.
