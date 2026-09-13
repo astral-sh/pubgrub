@@ -284,8 +284,8 @@ impl<DP: DependencyProvider> State<DP> {
     /// Unit propagation is the core mechanism of the solving algorithm.
     /// CF <https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation>
     ///
-    /// For each package with a satisfied incompatibility, returns the package and a handle to
-    /// the root cause conflict.
+    /// For each package with a satisfied incompatibility, returns the package and the root cause
+    /// conflict.
     #[cold]
     #[allow(clippy::type_complexity)] // Type definitions don't support impl trait.
     pub fn unit_propagation(
