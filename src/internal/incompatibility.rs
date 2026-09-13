@@ -206,7 +206,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         (versions, dependency_versions)
     }
 
-    pub(crate) fn dependency(&self) -> Option<Dependency<'_, P, VS>> {
+    pub(crate) fn as_dependency(&self) -> Option<Dependency<'_, P, VS>> {
         match &self.kind {
             Kind::FromDependencyOf(p1, p2) => {
                 let (dependent_versions, dependency_versions) = self.dependency_terms(*p1, *p2);
@@ -216,16 +216,6 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                     dependency: *p2,
                     dependency_versions,
                 })
-            }
-            _ => None,
-        }
-    }
-
-    pub(crate) fn as_dependency(&self) -> Option<(Id<P>, Id<P>, Option<&VS>)> {
-        match &self.kind {
-            Kind::FromDependencyOf(p1, p2) => {
-                let (_, dependency_range) = self.dependency_terms(*p1, *p2);
-                Some((*p1, *p2, dependency_range))
             }
             _ => None,
         }
@@ -246,9 +236,11 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         debug_assert!(dependency.is_some());
         // Check that both incompatibilities are of the shape p1 depends on p2,
         // with the same p1 and p2.
-        let (p1, p2, _) = dependency?;
-        let (other_p1, other_p2, _) = other.as_dependency()?;
-        if (p1, p2) != (other_p1, other_p2) {
+        let dependency = dependency?;
+        let other_dependency = other.as_dependency()?;
+        if (dependency.dependent, dependency.dependency)
+            != (other_dependency.dependent, other_dependency.dependency)
+        {
             return None;
         }
         // We ignore self-dependencies. They are always either trivially true or trivially false,
@@ -256,24 +248,25 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         // violated.
         // At time of writing, the public crate API only allowed a map of dependencies,
         // meaning it can't hit this branch, which requires two self-dependencies.
-        if p1 == p2 {
+        if dependency.dependent == dependency.dependency {
             return None;
         }
-        let dep_term = self.get(p2);
         // The dependency range for p2 must be the same in both case
         // to be able to merge multiple p1 ranges.
-        if dep_term != other.get(p2) {
+        if dependency.dependency_versions != other_dependency.dependency_versions {
             return None;
         }
         Some(Self::from_dependency(
-            p1,
-            self.get(p1)
-                .unwrap()
-                .unwrap_positive()
-                .union(other.get(p1).unwrap().unwrap_positive()), // It is safe to `simplify` here
+            dependency.dependent,
+            dependency
+                .dependent_versions
+                .union(other_dependency.dependent_versions), // It is safe to `simplify` here
             (
-                p2,
-                dep_term.map_or(VS::empty(), |v| v.unwrap_negative().clone()),
+                dependency.dependency,
+                dependency
+                    .dependency_versions
+                    .cloned()
+                    .unwrap_or_else(VS::empty),
             ),
         ))
     }
@@ -627,7 +620,7 @@ pub(crate) mod tests {
         expected_dependency_versions: &Ranges<usize>,
     ) {
         let dependency = incompatibility
-            .dependency()
+            .as_dependency()
             .expect("expected a dependency incompatibility");
         assert_eq!(dependency.dependent_versions, expected_versions);
         match dependency.dependency_versions {

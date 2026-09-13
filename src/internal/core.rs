@@ -204,7 +204,7 @@ impl<DP: DependencyProvider> State<DP> {
             .get(&package)
             .map_or(&[][..], Vec::as_slice)
             .iter()
-            .filter_map(|&id| self.incompatibility_store[id].dependency())
+            .filter_map(|&id| self.incompatibility_store[id].as_dependency())
     }
 
     /// Iterate over the packages participating in a conflict.
@@ -492,7 +492,13 @@ impl<DP: DependencyProvider> State<DP> {
     /// We could collapse them into { foo (1.0.0 ∪ 1.1.0), not bar ^1.0.0 }
     /// without having to check the existence of other versions though.
     fn merge_incompatibility(&mut self, mut id: IncompDpId<DP>) {
-        if let Some((p1, p2, dependency_range)) = self.incompatibility_store[id].as_dependency() {
+        if let Some(Dependency {
+            dependent: p1,
+            dependency: p2,
+            dependency_versions: dependency_range,
+            ..
+        }) = self.incompatibility_store[id].as_dependency()
+        {
             // Self-dependencies cannot be merged.
             if p1 != p2 {
                 let deps_lookup = self.merged_dependencies.bucket(p1, p2, &dependency_range);
