@@ -195,8 +195,7 @@ impl<DP: DependencyProvider> State<DP> {
     /// Iterate over the known incoming and outgoing dependencies of a package in solver order.
     ///
     /// Dependent versions with the same dependency range may be merged. Learned
-    /// incompatibilities and unavailable-version reasons are excluded. The caller must check
-    /// the version ranges when looking for dependencies active in a particular solution.
+    /// incompatibilities and unavailable-version reasons are excluded.
     pub fn dependencies(
         &self,
         package: Id<DP::P>,
