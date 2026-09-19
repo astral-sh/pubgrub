@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use crate::internal::{Arena, DecisionLevel, HashArena, Id, SmallMap};
 use crate::{
-    DependencyProvider, DerivationTree, Derived, External, Map, Package, Set, Term, VersionSet,
-    term,
+    Dependency, DependencyProvider, DerivationTree, Derived, External, Map, Package, Set, Term,
+    VersionSet, term,
 };
 
 #[derive(Debug, Clone)]
@@ -55,15 +55,14 @@ impl ContradictionCache {
 /// during conflict resolution. More about all this in
 /// [PubGrub documentation](https://github.com/dart-lang/pub/blob/master/doc/solver.md#incompatibility).
 #[derive(Debug, Clone)]
-pub struct Incompatibility<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
+pub(crate) struct Incompatibility<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     package_terms: SmallMap<Id<P>, Term<VS>>,
-    /// The reason for the incompatibility.
-    pub kind: Kind<P, VS, M>,
+    kind: Kind<P, VS, M>,
     contradiction_cache: ContradictionCache,
 }
 
 /// Type alias of unique identifiers for incompatibilities.
-pub type IncompId<P, VS, M> = Id<Incompatibility<P, VS, M>>;
+pub(crate) type IncompId<P, VS, M> = Id<Incompatibility<P, VS, M>>;
 
 pub(crate) type IncompDpId<DP> = IncompId<
     <DP as DependencyProvider>::P,
@@ -73,7 +72,7 @@ pub(crate) type IncompDpId<DP> = IncompId<
 
 /// The reason for the incompatibility.
 #[derive(Debug, Clone)]
-pub enum Kind<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
+enum Kind<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
     ///
     /// This incompatibility drives the resolution, it requires that we pick the (virtual) root
@@ -135,45 +134,25 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     }
 
     /// Create an incompatibility to remember that a given set does not contain any version.
-    pub fn no_versions(package: Id<P>, term: Term<VS>) -> Self {
-        let set = match &term {
-            Term::Positive(r) => r.clone(),
-            Term::Negative(_) => panic!("No version should have a positive term"),
-        };
+    pub(crate) fn no_versions(package: Id<P>, versions: VS) -> Self {
         Self {
-            package_terms: SmallMap::One([(package, term)]),
-            kind: Kind::NoVersions(package, set),
+            package_terms: SmallMap::One([(package, Term::Positive(versions.clone()))]),
+            kind: Kind::NoVersions(package, versions),
             contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
     /// Create an incompatibility for a reason outside pubgrub.
-    #[allow(dead_code)] // Used by uv
-    pub fn custom_term(package: Id<P>, term: Term<VS>, metadata: M) -> Self {
-        let set = match &term {
-            Term::Positive(r) => r.clone(),
-            Term::Negative(_) => panic!("No version should have a positive term"),
-        };
+    pub(crate) fn custom(package: Id<P>, versions: VS, metadata: M) -> Self {
         Self {
-            package_terms: SmallMap::One([(package, term)]),
-            kind: Kind::Custom(package, set, metadata),
-            contradiction_cache: ContradictionCache::not_contradicted(),
-        }
-    }
-
-    /// Create an incompatibility for a reason outside pubgrub.
-    pub fn custom_version(package: Id<P>, version: VS::V, metadata: M) -> Self {
-        let set = VS::singleton(version);
-        let term = Term::Positive(set.clone());
-        Self {
-            package_terms: SmallMap::One([(package, term)]),
-            kind: Kind::Custom(package, set, metadata),
+            package_terms: SmallMap::One([(package, Term::Positive(versions.clone()))]),
+            kind: Kind::Custom(package, versions, metadata),
             contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
     /// Build an incompatibility from a given dependency.
-    pub fn from_dependency(package: Id<P>, versions: VS, dep: (Id<P>, VS)) -> Self {
+    pub(crate) fn from_dependency(package: Id<P>, versions: VS, dep: (Id<P>, VS)) -> Self {
         let (p2, set2) = dep;
         Self {
             package_terms: if set2 == VS::empty() {
@@ -213,21 +192,17 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         (versions, dependency_versions)
     }
 
-    /// Returns the version sets for a dependency incompatibility.
-    ///
-    /// Returns `None` if this is not a dependency incompatibility. The dependency version set in
-    /// the returned pair is `None` when it is empty because empty dependencies are stored without a
-    /// negative term.
-    pub fn dependency_version_sets(&self) -> Option<(&VS, Option<&VS>)> {
+    pub(crate) fn as_dependency(&self) -> Option<Dependency<'_, P, VS>> {
         match &self.kind {
-            Kind::FromDependencyOf(p1, p2) => Some(self.dependency_terms(*p1, *p2)),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn as_dependency(&self) -> Option<(Id<P>, Id<P>)> {
-        match &self.kind {
-            Kind::FromDependencyOf(p1, p2) => Some((*p1, *p2)),
+            Kind::FromDependencyOf(p1, p2) => {
+                let (dependent_versions, dependency_versions) = self.dependency_terms(*p1, *p2);
+                Some(Dependency {
+                    dependent: *p1,
+                    dependent_versions,
+                    dependency: *p2,
+                    dependency_versions,
+                })
+            }
             _ => None,
         }
     }
@@ -245,36 +220,37 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         // It is almost certainly a bug to call this method without checking that self is a dependency
         let dependency = self.as_dependency();
         debug_assert!(dependency.is_some());
-        // Check that both incompatibilities are of the shape p1 depends on p2,
-        // with the same p1 and p2.
-        let self_pkgs = dependency?;
-        if self_pkgs != other.as_dependency()? {
+        // Check that both incompatibilities have the same dependent and dependency packages.
+        let dependency = dependency?;
+        let other_dependency = other.as_dependency()?;
+        if (dependency.dependent, dependency.dependency)
+            != (other_dependency.dependent, other_dependency.dependency)
+        {
             return None;
         }
-        let (p1, p2) = self_pkgs;
         // We ignore self-dependencies. They are always either trivially true or trivially false,
         // as the package version implies whether the constraint will always be fulfilled or always
         // violated.
         // At time of writing, the public crate API only allowed a map of dependencies,
         // meaning it can't hit this branch, which requires two self-dependencies.
-        if p1 == p2 {
+        if dependency.dependent == dependency.dependency {
             return None;
         }
-        let dep_term = self.get(p2);
-        // The dependency range for p2 must be the same in both case
-        // to be able to merge multiple p1 ranges.
-        if dep_term != other.get(p2) {
+        // Only merge dependent version ranges with the same dependency range.
+        if dependency.dependency_versions != other_dependency.dependency_versions {
             return None;
         }
         Some(Self::from_dependency(
-            p1,
-            self.get(p1)
-                .unwrap()
-                .unwrap_positive()
-                .union(other.get(p1).unwrap().unwrap_positive()), // It is safe to `simplify` here
+            dependency.dependent,
+            dependency
+                .dependent_versions
+                .union(other_dependency.dependent_versions), // It is safe to `simplify` here
             (
-                p2,
-                dep_term.map_or(VS::empty(), |v| v.unwrap_negative().clone()),
+                dependency.dependency,
+                dependency
+                    .dependency_versions
+                    .cloned()
+                    .unwrap_or_else(VS::empty),
             ),
         ))
     }
@@ -324,10 +300,6 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         };
     }
 
-    pub(crate) fn reset_contradiction_cache(&mut self) {
-        self.contradiction_cache = ContradictionCache::not_contradicted();
-    }
-
     /// Check if an incompatibility should mark the end of the algorithm
     /// because it satisfies the root package.
     pub(crate) fn is_terminal(&self, root_package: Id<P>, root_version: &VS::V) -> bool {
@@ -347,7 +319,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     }
 
     /// Iterate over packages.
-    pub fn iter(&self) -> impl Iterator<Item = (Id<P>, &Term<VS>)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (Id<P>, &Term<VS>)> {
         self.package_terms
             .iter()
             .map(|(package, term)| (*package, term))
@@ -627,11 +599,11 @@ pub(crate) mod tests {
         expected_dependency: &str,
         expected_dependency_versions: &Ranges<usize>,
     ) {
-        let (versions, dependency_versions) = incompatibility
-            .dependency_version_sets()
+        let dependency = incompatibility
+            .as_dependency()
             .expect("expected a dependency incompatibility");
-        assert_eq!(versions, expected_versions);
-        match dependency_versions {
+        assert_eq!(dependency.dependent_versions, expected_versions);
+        match dependency.dependency_versions {
             Some(dependency_versions) => {
                 assert_eq!(dependency_versions, expected_dependency_versions);
             }
