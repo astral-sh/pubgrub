@@ -81,16 +81,6 @@ impl<VS: VersionSet> Term<VS> {
             Self::Negative(set) => panic!("Negative term cannot unwrap positive set: {set:?}"),
         }
     }
-
-    /// Unwrap the set contained in a negative term.
-    ///
-    /// Panics if used on a positive set.
-    pub(crate) fn unwrap_negative(&self) -> &VS {
-        match self {
-            Self::Negative(set) => set,
-            Self::Positive(set) => panic!("Positive term cannot unwrap negative set: {set:?}"),
-        }
-    }
 }
 
 /// Set operations with terms.

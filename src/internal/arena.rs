@@ -84,7 +84,7 @@ impl<T> Id<T> {
 /// to have references between those items.
 /// They are all dropped at once when the arena is dropped.
 #[derive(Clone, PartialEq, Eq)]
-pub struct Arena<T> {
+pub(crate) struct Arena<T> {
     data: Vec<T>,
 }
 
