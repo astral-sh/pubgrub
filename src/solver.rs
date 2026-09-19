@@ -4,8 +4,8 @@ use std::collections::BTreeSet as Set;
 use std::error::Error;
 use std::fmt::{Debug, Display};
 
-use crate::internal::{Id, Incompatibility, State};
-use crate::{Map, Package, PubGrubError, Term, VersionSet};
+use crate::internal::{Id, State};
+use crate::{Map, Package, PubGrubError, VersionSet};
 use log::{debug, info};
 
 /// Tracks package versions whose dependency incompatibilities have already been added.
@@ -200,7 +200,7 @@ pub fn resolve<DP: DependencyProvider>(
                 .entry(affected)
                 .or_default()
                 .unit_propagation_affected += 1;
-            for (conflict_package, _) in state.incompatibility_store[incompat].iter() {
+            for conflict_package in state.conflict_packages(&incompat) {
                 if conflict_package == affected {
                     continue;
                 }
@@ -250,9 +250,8 @@ pub fn resolve<DP: DependencyProvider>(
         // Pick the next compatible version.
         let v = match decision {
             None => {
-                let inc =
-                    Incompatibility::no_versions(next, Term::Positive(term_intersection.clone()));
-                state.add_incompatibility(inc);
+                let versions = term_intersection.clone();
+                state.add_no_versions(next, versions);
                 continue;
             }
             Some(x) => x,
@@ -281,11 +280,7 @@ pub fn resolve<DP: DependencyProvider>(
 
             let dependencies = match dependencies {
                 Dependencies::Unavailable(reason) => {
-                    state.add_incompatibility(Incompatibility::custom_version(
-                        p,
-                        v.clone(),
-                        reason,
-                    ));
+                    state.add_unavailable(p, DP::VS::singleton(v), reason);
                     continue;
                 }
                 Dependencies::Available(x) => x,
@@ -297,7 +292,7 @@ pub fn resolve<DP: DependencyProvider>(
                 state.add_package_version_dependencies(p, v, versions, dependencies)
             {
                 conflict_tracker.entry(p).or_default().dependencies_affected += 1;
-                for (incompat_package, _) in state.incompatibility_store[conflict].iter() {
+                for incompat_package in state.conflict_packages(&conflict) {
                     if incompat_package == p {
                         continue;
                     }
