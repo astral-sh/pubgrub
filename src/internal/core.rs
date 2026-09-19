@@ -8,10 +8,30 @@ use std::hash::{BuildHasher, Hash};
 use std::sync::Arc;
 
 use crate::internal::{
-    Arena, DecisionLevel, HashArena, Id, IncompDpId, IncompId, Incompatibility, PartialSolution,
-    Relation, SatisfierSearch, SmallVec,
+    Arena, DecisionLevel, HashArena, Id, IncompDpId, Incompatibility, PartialSolution, Relation,
+    SatisfierSearch, SmallVec,
 };
 use crate::{DependencyProvider, DerivationTree, Map, NoSolutionError, Package, VersionSet};
+
+/// An opaque handle to a conflict recorded by solver state.
+#[derive(Copy, Clone, Debug)]
+pub struct ConflictId<DP: DependencyProvider>(IncompDpId<DP>);
+
+/// A dependency constraint from one package (dependent) onto another (dependency).
+///
+/// This may merge overlapping constraints from multiple dependent versions, hence the version
+/// range for dependent.
+#[derive(Debug)]
+pub struct Dependency<'a, P, VS> {
+    /// The package declaring the dependency.
+    pub dependent: Id<P>,
+    /// The versions of the dependent package sharing this dependency.
+    pub dependent_versions: &'a VS,
+    /// The required package.
+    pub dependency: Id<P>,
+    /// The required versions, or `None` if the dependency range is empty.
+    pub dependency_versions: Option<&'a VS>,
+}
 
 #[derive(Clone)]
 struct MergedDependencies<P: Package, I> {
@@ -27,17 +47,15 @@ impl<P: Package, I> Default for MergedDependencies<P, I> {
 }
 
 impl<P: Package, I> MergedDependencies<P, I> {
-    fn bucket(
-        &mut self,
-        dependent: Id<P>,
-        dependency: Id<P>,
-        range: &impl Hash,
-    ) -> &mut SmallVec<I> {
-        let range_hash = self.buckets.hasher().hash_one(range);
+    fn bucket<VS: VersionSet>(&mut self, dependency: Dependency<P, VS>) -> &mut SmallVec<I> {
+        let range_hash = self
+            .buckets
+            .hasher()
+            .hash_one(dependency.dependency_versions);
         self.buckets
             .entry(DependencyKey {
-                dependent,
-                dependency,
+                dependent: dependency.dependent,
+                dependency: dependency.dependency,
                 range_hash,
             })
             .or_default()
@@ -60,7 +78,7 @@ pub struct State<DP: DependencyProvider> {
 
     /// All incompatibilities indexed by package.
     #[allow(clippy::type_complexity)]
-    pub incompatibilities: Map<Id<DP::P>, Vec<IncompDpId<DP>>>,
+    incompatibilities: Map<Id<DP::P>, Vec<IncompDpId<DP>>>,
 
     /// All incompatibilities expressing dependencies, with common dependents merged.
     merged_dependencies: MergedDependencies<DP::P, IncompDpId<DP>>,
@@ -126,37 +144,63 @@ impl<DP: DependencyProvider> State<DP> {
         version: DP::V,
         versions: DP::VS,
         dependencies: impl IntoIterator<Item = (DP::P, DP::VS)>,
-    ) -> Option<IncompId<DP::P, DP::VS, DP::M>> {
+    ) -> Option<ConflictId<DP>> {
         debug_assert!(
             versions.contains(&version),
             "the version being decided must be in the version set sharing its dependencies",
         );
         let dep_incompats =
             self.add_incompatibility_from_dependencies(package, versions, dependencies);
-        self.partial_solution.add_package_version_incompatibilities(
-            package,
-            version,
-            dep_incompats,
-            &self.incompatibility_store,
-        )
+        self.partial_solution
+            .add_package_version_incompatibilities(
+                package,
+                version,
+                dep_incompats,
+                &self.incompatibility_store,
+            )
+            .map(ConflictId)
     }
 
     /// Record that no available version satisfies a version range.
-    pub(crate) fn add_no_versions(&mut self, package: Id<DP::P>, versions: DP::VS) {
+    pub fn add_no_versions(&mut self, package: Id<DP::P>, versions: DP::VS) {
         self.add_incompatibility(Incompatibility::no_versions(package, versions));
     }
 
     /// Record that a version range is unavailable for a reason outside the solver.
-    pub(crate) fn add_unavailable(&mut self, package: Id<DP::P>, versions: DP::VS, reason: DP::M) {
+    pub fn add_unavailable(&mut self, package: Id<DP::P>, versions: DP::VS, reason: DP::M) {
         self.add_incompatibility(Incompatibility::custom(package, versions, reason));
     }
 
-    /// Iterate over the packages participating in a conflict.
-    pub(crate) fn conflict_packages(
+    /// Record a dependency constraint without deciding a package version.
+    pub fn add_dependency(
+        &mut self,
+        package: Id<DP::P>,
+        versions: DP::VS,
+        dependency: (Id<DP::P>, DP::VS),
+    ) {
+        self.add_incompatibility(Incompatibility::from_dependency(
+            package, versions, dependency,
+        ));
+    }
+
+    /// Iterate over the known incoming and outgoing dependencies of a package.
+    ///
+    /// Dependent versions with the same dependency range may be merged. Learned
+    /// incompatibilities and unavailable-version reasons are excluded.
+    pub fn dependencies(
         &self,
-        conflict: &IncompDpId<DP>,
-    ) -> impl Iterator<Item = Id<DP::P>> {
-        self.incompatibility_store[*conflict]
+        package: Id<DP::P>,
+    ) -> impl Iterator<Item = Dependency<'_, DP::P, DP::VS>> {
+        self.incompatibilities
+            .get(&package)
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter_map(|&id| self.incompatibility_store[id].as_dependency())
+    }
+
+    /// Iterate over the packages participating in a conflict.
+    pub fn conflict_packages(&self, conflict: &ConflictId<DP>) -> impl Iterator<Item = Id<DP::P>> {
+        self.incompatibility_store[conflict.0]
             .iter()
             .map(|(package, _)| package)
     }
@@ -193,13 +237,14 @@ impl<DP: DependencyProvider> State<DP> {
     /// CF <https://github.com/dart-lang/pub/blob/master/doc/solver.md#unit-propagation>
     ///
     /// For each package with a satisfied incompatibility, returns the package and the root cause
-    /// incompatibility.
+    /// conflict.
     #[cold]
     #[allow(clippy::type_complexity)] // Type definitions don't support impl trait.
     pub fn unit_propagation(
         &mut self,
         package: Id<DP::P>,
-    ) -> Result<SmallVec<(Id<DP::P>, IncompDpId<DP>)>, NoSolutionError<DP>> {
+    ) -> Result<impl IntoIterator<Item = (Id<DP::P>, ConflictId<DP>)> + use<DP>, NoSolutionError<DP>>
+    {
         let mut satisfier_causes = SmallVec::default();
         self.unit_propagation_buffer.clear();
         self.unit_propagation_buffer.push(package);
@@ -273,7 +318,9 @@ impl<DP: DependencyProvider> State<DP> {
             }
         }
         // If there are no more changed packages, unit propagation is done.
-        Ok(satisfier_causes)
+        Ok(satisfier_causes
+            .into_iter()
+            .map(|(package, id)| (package, ConflictId(id))))
     }
 
     /// Return the root cause or the terminal incompatibility. CF
@@ -397,35 +444,27 @@ impl<DP: DependencyProvider> State<DP> {
     /// We could collapse them into { foo (1.0.0 ∪ 1.1.0), not bar ^1.0.0 }
     /// without having to check the existence of other versions though.
     fn merge_incompatibility(&mut self, mut id: IncompDpId<DP>) {
-        if let Some((p1, p2)) = self.incompatibility_store[id].as_dependency() {
+        if let Some(dependency) = self.incompatibility_store[id].as_dependency()
             // Self-dependencies cannot be merged.
-            if p1 != p2 {
-                let deps_lookup = self.merged_dependencies.bucket(
-                    p1,
-                    p2,
-                    &self.incompatibility_store[id]
-                        .get(p2)
-                        .map(|term| term.unwrap_negative()),
-                );
-                if let Some((past, merged)) =
-                    deps_lookup.as_mut_slice().iter_mut().find_map(|past| {
-                        self.incompatibility_store[id]
-                            .merge_dependents(&self.incompatibility_store[*past])
-                            .map(|merged| (past, merged))
-                    })
-                {
-                    let new = self.incompatibility_store.alloc(merged);
-                    for (pkg, _) in self.incompatibility_store[new].iter() {
-                        self.incompatibilities
-                            .entry(pkg)
-                            .or_default()
-                            .retain(|id| id != past);
-                    }
-                    *past = new;
-                    id = new;
-                } else {
-                    deps_lookup.push(id);
+            && dependency.dependent != dependency.dependency
+        {
+            let deps_lookup = self.merged_dependencies.bucket(dependency);
+            if let Some((past, merged)) = deps_lookup.as_mut_slice().iter_mut().find_map(|past| {
+                self.incompatibility_store[id]
+                    .merge_dependents(&self.incompatibility_store[*past])
+                    .map(|merged| (past, merged))
+            }) {
+                let new = self.incompatibility_store.alloc(merged);
+                for (pkg, _) in self.incompatibility_store[new].iter() {
+                    self.incompatibilities
+                        .entry(pkg)
+                        .or_default()
+                        .retain(|id| id != past);
                 }
+                *past = new;
+                id = new;
+            } else {
+                deps_lookup.push(id);
             }
         }
         for (pkg, term) in self.incompatibility_store[id].iter() {
