@@ -70,7 +70,6 @@ pub(crate) type IncompDpId<DP> = IncompId<
     <DP as DependencyProvider>::M,
 >;
 
-/// The reason for the incompatibility.
 #[derive(Debug, Clone)]
 enum Kind<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// Initial incompatibility aiming at picking the root package for the first decision.
@@ -192,23 +191,23 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         (versions, dependency_versions)
     }
 
-    pub(crate) fn as_dependency(&self) -> Option<Dependency<'_, P, VS>> {
+    pub(crate) fn as_dependency(&self) -> Option<(Id<P>, Id<P>)> {
         match &self.kind {
-            Kind::FromDependencyOf(p1, p2) => {
-                let (dependent_versions, dependency_versions) = self.dependency_terms(*p1, *p2);
-                Some(Dependency {
-                    dependent: *p1,
-                    dependent_versions,
-                    dependency: *p2,
-                    dependency_versions,
-                })
-            }
+            Kind::FromDependencyOf(p1, p2) => Some((*p1, *p2)),
             _ => None,
         }
     }
 
     pub(crate) fn dependency(&self) -> Option<Dependency<'_, P, VS>> {
-        self.as_dependency()
+        let (dependent, dependency) = self.as_dependency()?;
+        let (dependent_versions, dependency_versions) =
+            self.dependency_terms(dependent, dependency);
+        Some(Dependency {
+            dependent,
+            dependent_versions,
+            dependency,
+            dependency_versions,
+        })
     }
 
     /// Merge dependant versions with the same dependency.
@@ -222,39 +221,37 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     /// is the common dependant in the two incompatibilities expressing dependencies.
     pub(crate) fn merge_dependents(&self, other: &Self) -> Option<Self> {
         // It is almost certainly a bug to call this method without checking that self is a dependency
-        let dependency = self.as_dependency();
-        debug_assert!(dependency.is_some());
-        // Check that both incompatibilities have the same dependent and dependency packages.
-        let dependency = dependency?;
-        let other_dependency = other.as_dependency()?;
-        if (dependency.dependent, dependency.dependency)
-            != (other_dependency.dependent, other_dependency.dependency)
-        {
+        debug_assert!(self.as_dependency().is_some());
+        // Check that both incompatibilities are of the shape p1 depends on p2,
+        // with the same p1 and p2.
+        let self_pkgs = self.as_dependency()?;
+        if self_pkgs != other.as_dependency()? {
             return None;
         }
+        let (p1, p2) = self_pkgs;
         // We ignore self-dependencies. They are always either trivially true or trivially false,
         // as the package version implies whether the constraint will always be fulfilled or always
         // violated.
         // At time of writing, the public crate API only allowed a map of dependencies,
         // meaning it can't hit this branch, which requires two self-dependencies.
-        if dependency.dependent == dependency.dependency {
+        if p1 == p2 {
             return None;
         }
-        // Only merge dependent version ranges with the same dependency range.
-        if dependency.dependency_versions != other_dependency.dependency_versions {
+        let dep_term = self.get(p2);
+        // The dependency range for p2 must be the same in both case
+        // to be able to merge multiple p1 ranges.
+        if dep_term != other.get(p2) {
             return None;
         }
         Some(Self::from_dependency(
-            dependency.dependent,
-            dependency
-                .dependent_versions
-                .union(other_dependency.dependent_versions), // It is safe to `simplify` here
+            p1,
+            self.get(p1)
+                .unwrap()
+                .unwrap_positive()
+                .union(other.get(p1).unwrap().unwrap_positive()), // It is safe to `simplify` here
             (
-                dependency.dependency,
-                dependency
-                    .dependency_versions
-                    .cloned()
-                    .unwrap_or_else(VS::empty),
+                p2,
+                dep_term.map_or(VS::empty(), |v| v.unwrap_negative().clone()),
             ),
         ))
     }
@@ -428,7 +425,6 @@ impl<'a, P: Package, VS: VersionSet + 'a, M: Eq + Clone + Debug + Display + 'a>
 }
 
 impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibility<P, VS, M> {
-    /// Display the incompatibility.
     pub fn display<'a>(&'a self, package_store: &'a HashArena<P>) -> impl Display + 'a {
         match self.iter().collect::<Vec<_>>().as_slice() {
             [] => "version solving failed".into(),
@@ -478,6 +474,32 @@ pub(crate) mod tests {
     use crate::term::tests::strategy as term_strat;
     use crate::{OfflineDependencyProvider, Ranges};
 
+    #[test]
+    fn contradiction_cache_tracks_backtrack_generations() {
+        let current_generation = ContradictionCache {
+            decision_level: DecisionLevel::new(3),
+            backtrack_generation: 1,
+        };
+
+        // A generation without a recorded backtrack target is still active.
+        assert!(current_generation.is_contradicted(&[DecisionLevel::ZERO]));
+        // Backtracking below the contradiction's decision level invalidates it.
+        assert!(!current_generation.is_contradicted(&[DecisionLevel::ZERO, DecisionLevel::new(2)]));
+        // Backtracking to or above that decision level preserves it.
+        assert!(current_generation.is_contradicted(&[DecisionLevel::ZERO, DecisionLevel::new(3)]));
+
+        let later_generation = ContradictionCache {
+            decision_level: DecisionLevel::new(5),
+            backtrack_generation: 2,
+        };
+        assert!(later_generation.is_contradicted(&[DecisionLevel::ZERO, DecisionLevel::new(3)]));
+        assert!(!later_generation.is_contradicted(&[
+            DecisionLevel::ZERO,
+            DecisionLevel::new(3),
+            DecisionLevel::new(4),
+        ]));
+    }
+
     #[derive(Debug, Eq, Hash, PartialEq)]
     struct PanicOnCloneRanges(Ranges<usize>);
 
@@ -515,32 +537,6 @@ pub(crate) mod tests {
         fn contains(&self, v: &Self::V) -> bool {
             self.0.contains(v)
         }
-    }
-
-    #[test]
-    fn contradiction_cache_tracks_backtrack_generations() {
-        let current_generation = ContradictionCache {
-            decision_level: DecisionLevel::new(3),
-            backtrack_generation: 1,
-        };
-
-        // A generation without a recorded backtrack target is still active.
-        assert!(current_generation.is_contradicted(&[DecisionLevel::ZERO]));
-        // Backtracking below the contradiction's decision level invalidates it.
-        assert!(!current_generation.is_contradicted(&[DecisionLevel::ZERO, DecisionLevel::new(2)]));
-        // Backtracking to or above that decision level preserves it.
-        assert!(current_generation.is_contradicted(&[DecisionLevel::ZERO, DecisionLevel::new(3)]));
-
-        let later_generation = ContradictionCache {
-            decision_level: DecisionLevel::new(5),
-            backtrack_generation: 2,
-        };
-        assert!(later_generation.is_contradicted(&[DecisionLevel::ZERO, DecisionLevel::new(3)]));
-        assert!(!later_generation.is_contradicted(&[
-            DecisionLevel::ZERO,
-            DecisionLevel::new(3),
-            DecisionLevel::new(4),
-        ]));
     }
 
     proptest! {
@@ -608,7 +604,7 @@ pub(crate) mod tests {
         expected_dependency_versions: &Ranges<usize>,
     ) {
         let dependency = incompatibility
-            .as_dependency()
+            .dependency()
             .expect("expected a dependency incompatibility");
         assert_eq!(dependency.dependent_versions, expected_versions);
         match dependency.dependency_versions {
