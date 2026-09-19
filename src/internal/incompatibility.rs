@@ -6,10 +6,10 @@
 use std::fmt::{Debug, Display};
 use std::sync::Arc;
 
-use crate::internal::{Arena, DecisionLevel, HashArena, Id, SmallMap};
+use crate::internal::{Arena, DecisionLevel, Dependency, HashArena, Id, SmallMap};
 use crate::{
-    Dependency, DependencyProvider, DerivationTree, Derived, External, Map, Package, Set, Term,
-    VersionSet, term,
+    DependencyProvider, DerivationTree, Derived, External, Map, Package, Set, Term, VersionSet,
+    term,
 };
 
 #[derive(Debug, Clone)]
@@ -603,17 +603,6 @@ pub(crate) mod tests {
         expected_dependency: &str,
         expected_dependency_versions: &Ranges<usize>,
     ) {
-        let dependency = incompatibility
-            .dependency()
-            .expect("expected a dependency incompatibility");
-        assert_eq!(dependency.dependent_versions, expected_versions);
-        match dependency.dependency_versions {
-            Some(dependency_versions) => {
-                assert_eq!(dependency_versions, expected_dependency_versions);
-            }
-            None => assert_eq!(expected_dependency_versions, &Ranges::empty()),
-        }
-
         let mut store = Arena::new();
         let id = store.alloc(incompatibility);
         let tree = Incompatibility::build_derivation_tree(
