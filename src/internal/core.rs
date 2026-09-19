@@ -47,15 +47,17 @@ impl<P: Package, I> Default for MergedDependencies<P, I> {
 }
 
 impl<P: Package, I> MergedDependencies<P, I> {
-    fn bucket<VS: VersionSet>(&mut self, dependency: Dependency<P, VS>) -> &mut SmallVec<I> {
-        let range_hash = self
-            .buckets
-            .hasher()
-            .hash_one(dependency.dependency_versions);
+    fn bucket(
+        &mut self,
+        dependent: Id<P>,
+        dependency: Id<P>,
+        range: &impl Hash,
+    ) -> &mut SmallVec<I> {
+        let range_hash = self.buckets.hasher().hash_one(range);
         self.buckets
             .entry(DependencyKey {
-                dependent: dependency.dependent,
-                dependency: dependency.dependency,
+                dependent,
+                dependency,
                 range_hash,
             })
             .or_default()
@@ -195,7 +197,7 @@ impl<DP: DependencyProvider> State<DP> {
             .get(&package)
             .map_or(&[][..], Vec::as_slice)
             .iter()
-            .filter_map(|&id| self.incompatibility_store[id].as_dependency())
+            .filter_map(|&id| self.incompatibility_store[id].dependency())
     }
 
     /// Iterate over the packages participating in a conflict.
@@ -402,8 +404,7 @@ impl<DP: DependencyProvider> State<DP> {
         }
     }
 
-    /// After a conflict occurred, backtrack the partial solution to a given decision level, and add
-    /// the incompatibility if it was new.
+    /// Backtracking.
     fn backtrack(
         &mut self,
         incompat: IncompDpId<DP>,
@@ -444,27 +445,35 @@ impl<DP: DependencyProvider> State<DP> {
     /// We could collapse them into { foo (1.0.0 ∪ 1.1.0), not bar ^1.0.0 }
     /// without having to check the existence of other versions though.
     fn merge_incompatibility(&mut self, mut id: IncompDpId<DP>) {
-        if let Some(dependency) = self.incompatibility_store[id].as_dependency()
+        if let Some((p1, p2)) = self.incompatibility_store[id].as_dependency() {
             // Self-dependencies cannot be merged.
-            && dependency.dependent != dependency.dependency
-        {
-            let deps_lookup = self.merged_dependencies.bucket(dependency);
-            if let Some((past, merged)) = deps_lookup.as_mut_slice().iter_mut().find_map(|past| {
-                self.incompatibility_store[id]
-                    .merge_dependents(&self.incompatibility_store[*past])
-                    .map(|merged| (past, merged))
-            }) {
-                let new = self.incompatibility_store.alloc(merged);
-                for (pkg, _) in self.incompatibility_store[new].iter() {
-                    self.incompatibilities
-                        .entry(pkg)
-                        .or_default()
-                        .retain(|id| id != past);
+            if p1 != p2 {
+                let deps_lookup = self.merged_dependencies.bucket(
+                    p1,
+                    p2,
+                    &self.incompatibility_store[id]
+                        .get(p2)
+                        .map(|term| term.unwrap_negative()),
+                );
+                if let Some((past, merged)) =
+                    deps_lookup.as_mut_slice().iter_mut().find_map(|past| {
+                        self.incompatibility_store[id]
+                            .merge_dependents(&self.incompatibility_store[*past])
+                            .map(|merged| (past, merged))
+                    })
+                {
+                    let new = self.incompatibility_store.alloc(merged);
+                    for (pkg, _) in self.incompatibility_store[new].iter() {
+                        self.incompatibilities
+                            .entry(pkg)
+                            .or_default()
+                            .retain(|id| id != past);
+                    }
+                    *past = new;
+                    id = new;
+                } else {
+                    deps_lookup.push(id);
                 }
-                *past = new;
-                id = new;
-            } else {
-                deps_lookup.push(id);
             }
         }
         for (pkg, term) in self.incompatibility_store[id].iter() {
