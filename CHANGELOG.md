@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Breaking
+
+- Make `Term::unwrap_positive` crate-private. Match on `Term::Positive` to borrow its version set instead.
+
 ### Added
 
 - Add `VersionSet::contains_many`, forwarded to `Ranges::contains_many` for `Ranges`, and use it in `OfflineDependencyProvider::prioritize` to count matching versions in one pass over the sorted versions.
