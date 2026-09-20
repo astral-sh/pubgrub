@@ -8,7 +8,6 @@ use std::fmt::{Debug, Display};
 use std::hash::BuildHasherDefault;
 use std::num::NonZeroU32;
 
-use log::debug;
 use priority_queue::PriorityQueue;
 use rustc_hash::FxHasher;
 
@@ -301,6 +300,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
     /// The list of package that have not been selected after the last prioritization.
     ///
     /// This list gets updated by [`Self::pick_highest_priority_pkg`] and cleared by backtracking.
+    #[cfg(feature = "unstable-state-api")]
     #[allow(clippy::type_complexity)]
     pub fn undecided_packages(
         &self,
@@ -362,6 +362,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         }
     }
 
+    #[cfg(feature = "unstable-state-api")]
     #[cold]
     pub fn prioritized_packages(&self) -> impl Iterator<Item = (Id<DP::P>, &DP::VS)> {
         // TODO(konsti): Should we use `self.outdated_priorities` instead?
@@ -503,6 +504,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
     ///
     /// Returns the new decision level on success and an error if the package was not decided on
     /// yet.
+    #[cfg(feature = "unstable-state-api")]
     pub(crate) fn backtrack_package(&mut self, package: Id<DP::P>) -> Result<DecisionLevel, ()> {
         let Some(decision_level) = self.package_assignments.get_index_of(&package) else {
             return Err(());
@@ -512,7 +514,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
         if decision_level >= self.current_decision_level {
             return Err(());
         }
-        debug!(
+        log::debug!(
             "Package backtracking ot decision level {}",
             decision_level.get()
         );
@@ -691,6 +693,7 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
     }
 
     /// Retrieve the constraints on a package that will not change.
+    #[cfg(feature = "unstable-state-api")]
     pub fn unchanging_term_for_package(&self, package: Id<DP::P>) -> Option<&Term<DP::VS>> {
         let pa = self.package_assignments.get(&package)?;
 
