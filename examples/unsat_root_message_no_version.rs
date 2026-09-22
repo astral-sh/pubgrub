@@ -32,24 +32,23 @@ impl ReportFormatter<Package, Ranges<SemanticVersion>, String> for CustomReportF
         let terms_vec: Vec<_> = terms.iter().collect();
         match terms_vec.as_slice() {
             [] => "version solving failed".into(),
-            [(package @ Package::Root, Term::Positive(_))] => {
-                format!("{package} is forbidden")
+            [(package, term)] => {
+                let requirement = if term.negative {
+                    "mandatory"
+                } else {
+                    "forbidden"
+                };
+                match package {
+                    Package::Root => format!("{package} is {requirement}"),
+                    Package::Package(_) => format!("{package} {} is {requirement}", term.set),
+                }
             }
-            [(package @ Package::Root, Term::Negative(_))] => {
-                format!("{package} is mandatory")
-            }
-            [(package @ Package::Package(_), Term::Positive(ranges))] => {
-                format!("{package} {ranges} is forbidden")
-            }
-            [(package @ Package::Package(_), Term::Negative(ranges))] => {
-                format!("{package} {ranges} is mandatory")
-            }
-            [(p1, Term::Positive(r1)), (p2, Term::Negative(r2))] => {
-                External::<_, _, String>::FromDependencyOf(p1, r1.clone(), p2, r2.clone())
+            [(p1, t1), (p2, t2)] if !t1.negative && t2.negative => {
+                External::<_, _, String>::FromDependencyOf(p1, t1.set.clone(), p2, t2.set.clone())
                     .to_string()
             }
-            [(p1, Term::Negative(r1)), (p2, Term::Positive(r2))] => {
-                External::<_, _, String>::FromDependencyOf(p2, r2.clone(), p1, r1.clone())
+            [(p1, t1), (p2, t2)] if t1.negative && !t2.negative => {
+                External::<_, _, String>::FromDependencyOf(p2, t2.set.clone(), p1, t1.set.clone())
                     .to_string()
             }
             slice => {

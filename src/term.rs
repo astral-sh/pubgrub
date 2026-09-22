@@ -9,87 +9,102 @@ use crate::{SetRelation, VersionSet};
 
 /// A positive or negative expression regarding a set of versions.
 ///
-/// `Positive(r)` and `Negative(r.complement())` are not equivalent:
-/// * the term `Positive(r)` is satisfied if the package is selected AND the selected version is in `r`.
-/// * the term `Negative(r.complement())` is satisfied if the package is not selected OR the selected version is in `r`.
+/// `positive(r)` and `negative(r.complement())` are not equivalent:
+/// * the term `positive(r)` is satisfied if the package is selected AND the selected version is in `r`.
+/// * the term `negative(r.complement())` is satisfied if the package is not selected OR the selected version is in `r`.
 ///
-/// A `Positive` term in the partial solution requires a version to be selected, but a `Negative` term
+/// A positive term in the partial solution requires a version to be selected, but a negative term
 /// allows for a solution that does not have that package selected.
-/// Specifically, `Positive(VS::empty())` means that there was a conflict (we need to select a version for the package
-/// but can't pick any), while `Negative(VS::full())` would mean it is fine as long as we don't select the package.
+/// Specifically, `positive(VS::empty())` means that there was a conflict (we need to select a version for the package
+/// but can't pick any), while `negative(VS::full())` would mean it is fine as long as we don't select the package.
+///
+/// Equivalently, a term describes a set of `Option<Version>` values: a positive term contains
+/// `Some(v)` for versions in its set, while a negative term contains `None` and `Some(v)` for
+/// versions outside its set. Negating a term therefore only needs to flip its polarity.
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub enum Term<VS: VersionSet> {
-    /// For example, `1.0.0 <= v < 2.0.0` is a positive expression
-    /// that is evaluated true if a version is selected
-    /// and comprised between version 1.0.0 and version 2.0.0.
-    Positive(VS),
-    /// The term `not (v < 3.0.0)` is a negative expression
-    /// that is evaluated true if a version >= 3.0.0 is selected
-    /// or if no version is selected at all.
-    Negative(VS),
+pub struct Term<VS: VersionSet> {
+    /// Whether the term excludes the set and allows the package to be unselected.
+    pub negative: bool,
+    /// The versions included by a positive term or excluded by a negative term.
+    pub set: VS,
 }
 
 /// Base methods.
 impl<VS: VersionSet> Term<VS> {
+    /// A term requiring the package to be selected with a version in the set.
+    pub fn positive(set: VS) -> Self {
+        Self {
+            set,
+            negative: false,
+        }
+    }
+
+    /// A term allowing the package to be unselected or have a version outside the set.
+    pub fn negative(set: VS) -> Self {
+        Self {
+            set,
+            negative: true,
+        }
+    }
+
     /// A term that is always true.
     pub(crate) fn any() -> Self {
-        Self::Negative(VS::empty())
+        Self::negative(VS::empty())
     }
 
     /// A term that is never true.
+    #[cfg(test)]
     pub(crate) fn empty() -> Self {
-        Self::Positive(VS::empty())
+        Self::positive(VS::empty())
     }
 
     /// A positive term containing exactly that version.
     pub(crate) fn exact(version: VS::V) -> Self {
-        Self::Positive(VS::singleton(version))
+        Self::positive(VS::singleton(version))
     }
 
     /// Simply check if a term is positive.
     pub(crate) fn is_positive(&self) -> bool {
-        match self {
-            Self::Positive(_) => true,
-            Self::Negative(_) => false,
-        }
+        !self.negative
     }
 
     /// Negate a term.
     /// Evaluation of a negated term always returns
     /// the opposite of the evaluation of the original one.
     pub(crate) fn negate(&self) -> Self {
-        match self {
-            Self::Positive(set) => Self::Negative(set.clone()),
-            Self::Negative(set) => Self::Positive(set.clone()),
+        Self {
+            negative: !self.negative,
+            set: self.set.clone(),
         }
     }
 
     /// Evaluate a term regarding a given choice of version.
     pub(crate) fn contains(&self, v: &VS::V) -> bool {
-        match self {
-            Self::Positive(set) => set.contains(v),
-            Self::Negative(set) => !set.contains(v),
-        }
+        self.set.contains(v) ^ self.negative
     }
 
     /// Unwrap the set contained in a positive term.
     ///
     /// Panics if used on a negative set.
     pub(crate) fn unwrap_positive(&self) -> &VS {
-        match self {
-            Self::Positive(set) => set,
-            Self::Negative(set) => panic!("Negative term cannot unwrap positive set: {set:?}"),
-        }
+        assert!(
+            !self.negative,
+            "Negative term cannot unwrap positive set: {:?}",
+            self.set
+        );
+        &self.set
     }
 
     /// Unwrap the set contained in a negative term.
     ///
     /// Panics if used on a positive set.
     pub(crate) fn unwrap_negative(&self) -> &VS {
-        match self {
-            Self::Negative(set) => set,
-            Self::Positive(set) => panic!("Positive term cannot unwrap negative set: {set:?}"),
-        }
+        assert!(
+            self.negative,
+            "Positive term cannot unwrap negative set: {:?}",
+            self.set
+        );
+        &self.set
     }
 }
 
@@ -100,55 +115,55 @@ impl<VS: VersionSet> Term<VS> {
     /// The intersection is negative (unselected package is allowed)
     /// if all terms are negative.
     pub(crate) fn intersection(&self, other: &Self) -> Self {
-        match (self, other) {
-            (Self::Positive(r1), Self::Positive(r2)) => Self::Positive(r1.intersection(r2)),
-            (Self::Positive(p), Self::Negative(n)) | (Self::Negative(n), Self::Positive(p)) => {
-                Self::Positive(p.difference(n))
-            }
-            (Self::Negative(r1), Self::Negative(r2)) => Self::Negative(r1.union(r2)),
+        Self {
+            set: match (self.negative, other.negative) {
+                (false, false) => self.set.intersection(&other.set),
+                (false, true) => self.set.difference(&other.set),
+                (true, false) => other.set.difference(&self.set),
+                (true, true) => self.set.union(&other.set),
+            },
+            negative: self.negative & other.negative,
         }
     }
 
-    /// Check whether two terms are mutually exclusive.
-    ///
-    /// An optimization for the native implementation of checking whether the intersection of two sets is empty.
-    pub(crate) fn is_disjoint(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Positive(r1), Self::Positive(r2)) => r1.is_disjoint(r2),
-            // Unselected package is allowed in both terms, so they are never disjoint.
-            (Self::Negative(_), Self::Negative(_)) => false,
-            // If the positive term is a subset of the negative term, it lies fully in the region that the negative
-            // term excludes.
-            (Self::Positive(p), Self::Negative(n)) | (Self::Negative(n), Self::Positive(p)) => {
-                p.subset_of(n)
-            }
+    /// Intersect with the negation of another term without cloning its version set.
+    pub(crate) fn difference(&self, other: &Self) -> Self {
+        Self {
+            set: match (self.negative, other.negative) {
+                (false, false) => self.set.difference(&other.set),
+                (false, true) => self.set.intersection(&other.set),
+                (true, false) => self.set.union(&other.set),
+                (true, true) => other.set.difference(&self.set),
+            },
+            negative: self.negative & !other.negative,
         }
     }
 
     /// Compute the union of two terms.
     /// If at least one term is negative, the union is also negative (unselected package is allowed).
     pub(crate) fn union(&self, other: &Self) -> Self {
-        match (self, other) {
-            (Self::Positive(r1), Self::Positive(r2)) => Self::Positive(r1.union(r2)),
-            (Self::Positive(p), Self::Negative(n)) | (Self::Negative(n), Self::Positive(p)) => {
-                Self::Negative(n.difference(p))
-            }
-            (Self::Negative(r1), Self::Negative(r2)) => Self::Negative(r1.intersection(r2)),
+        Self {
+            set: match (self.negative, other.negative) {
+                (false, false) => self.set.union(&other.set),
+                (false, true) => other.set.difference(&self.set),
+                (true, false) => self.set.difference(&other.set),
+                (true, true) => self.set.intersection(&other.set),
+            },
+            negative: self.negative | other.negative,
         }
     }
 
     /// Indicate if this term is a subset of another term.
     /// Just like for sets, we say that t1 is a subset of t2
     /// if and only if t1 ∩ t2 = t1.
-    #[cfg(test)]
     pub(crate) fn subset_of(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Positive(r1), Self::Positive(r2)) => r1.subset_of(r2),
-            (Self::Positive(r1), Self::Negative(r2)) => r1.is_disjoint(r2),
+        match (self.negative, other.negative) {
+            (false, false) => self.set.subset_of(&other.set),
+            (false, true) => self.set.is_disjoint(&other.set),
             // Only a negative term allows the unselected package,
             // so it can never be a subset of a positive term.
-            (Self::Negative(_), Self::Positive(_)) => false,
-            (Self::Negative(r1), Self::Negative(r2)) => r2.subset_of(r1),
+            (true, false) => false,
+            (true, true) => other.set.subset_of(&self.set),
         }
     }
 }
@@ -200,37 +215,25 @@ impl<VS: VersionSet> Term<VS> {
     /// Satisfaction takes precedence when an empty positive intersection both satisfies and
     /// contradicts the term.
     pub(crate) fn relation_with(&self, other_terms_intersection: &Self) -> Relation {
-        match (self, other_terms_intersection) {
-            (Self::Positive(range), Self::Positive(other)) => match other.relation(range) {
-                SetRelation::Subset => Relation::Satisfied,
-                SetRelation::Disjoint => Relation::Contradicted,
-                SetRelation::Overlapping => Relation::Inconclusive,
-            },
-            (Self::Positive(range), Self::Negative(other)) => {
-                if range.subset_of(other) {
-                    Relation::Contradicted
-                } else {
-                    Relation::Inconclusive
-                }
+        let range = &self.set;
+        let other = &other_terms_intersection.set;
+        let satisfied = if other_terms_intersection.negative {
+            if !range.subset_of(other) {
+                return Relation::Inconclusive;
             }
-            (Self::Negative(range), Self::Positive(other)) => {
-                if other == &VS::empty() {
-                    Relation::Satisfied
-                } else {
-                    match other.relation(range) {
-                        SetRelation::Subset => Relation::Contradicted,
-                        SetRelation::Disjoint => Relation::Satisfied,
-                        SetRelation::Overlapping => Relation::Inconclusive,
-                    }
-                }
+            self.negative
+        } else {
+            match other.relation(range) {
+                // An empty positive intersection satisfies every term.
+                SetRelation::Subset => !self.negative || other == &VS::empty(),
+                SetRelation::Disjoint => self.negative,
+                SetRelation::Overlapping => return Relation::Inconclusive,
             }
-            (Self::Negative(range), Self::Negative(other)) => {
-                if range.subset_of(other) {
-                    Relation::Satisfied
-                } else {
-                    Relation::Inconclusive
-                }
-            }
+        };
+        if satisfied {
+            Relation::Satisfied
+        } else {
+            Relation::Contradicted
         }
     }
 }
@@ -243,11 +246,12 @@ impl<VS: VersionSet> AsRef<Self> for Term<VS> {
 
 // REPORT ######################################################################
 
-impl<VS: VersionSet + Display> Display for Term<VS> {
+impl<VS: VersionSet> Display for Term<VS> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Positive(set) => write!(f, "{set}"),
-            Self::Negative(set) => write!(f, "Not ( {set} )"),
+        if self.negative {
+            write!(f, "Not ( {} )", self.set)
+        } else {
+            Display::fmt(&self.set, f)
         }
     }
 }
@@ -299,14 +303,14 @@ pub mod tests {
 
     pub fn strategy() -> impl Strategy<Value = Term<Ranges<u32>>> {
         prop_oneof![
-            version_ranges::proptest_strategy().prop_map(Term::Negative),
-            version_ranges::proptest_strategy().prop_map(Term::Positive),
+            version_ranges::proptest_strategy().prop_map(Term::negative),
+            version_ranges::proptest_strategy().prop_map(Term::positive),
         ]
     }
 
     #[test]
     fn empty_positive_intersection_satisfies_negative_term() {
-        let term = Term::Negative(Ranges::<u32>::singleton(1u32));
+        let term = Term::negative(Ranges::<u32>::singleton(1u32));
 
         assert!(matches!(
             term.relation_with(&Term::empty()),
@@ -320,11 +324,11 @@ pub mod tests {
         let two = NoDisjointRanges::singleton(2);
 
         assert!(matches!(
-            Term::Positive(one.clone()).relation_with(&Term::Negative(two.clone())),
+            Term::positive(one.clone()).relation_with(&Term::negative(two.clone())),
             Relation::Inconclusive
         ));
         assert!(matches!(
-            Term::Negative(one).relation_with(&Term::Negative(two)),
+            Term::negative(one).relation_with(&Term::negative(two)),
             Relation::Inconclusive
         ));
     }
@@ -355,9 +359,8 @@ pub mod tests {
         }
 
         #[test]
-        fn is_disjoint_through_intersection(r1 in strategy(), r2 in strategy()) {
-            let disjoint_def = r1.intersection(&r2) == Term::empty();
-            assert_eq!(r1.is_disjoint(&r2), disjoint_def);
+        fn difference_through_intersection(r1 in strategy(), r2 in strategy()) {
+            assert_eq!(r1.difference(&r2), r1.intersection(&r2.negate()));
         }
 
         #[test]
