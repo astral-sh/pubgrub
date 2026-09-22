@@ -387,11 +387,15 @@ impl<DP: DependencyProvider> State<DP> {
                         satisfier_causes.push((package, current_incompat_id));
                         return Ok((package, current_incompat_id));
                     }
-                    SatisfierSearch::SameDecisionLevels { satisfier_cause } => {
+                    SatisfierSearch::SameDecisionLevels {
+                        satisfier_cause,
+                        resolved_term,
+                    } => {
                         let prior_cause = Incompatibility::prior_cause(
                             current_incompat_id,
                             satisfier_cause,
                             package,
+                            resolved_term,
                             &self.incompatibility_store,
                         );
                         log::info!("prior cause: {}", prior_cause.display(&self.package_store));

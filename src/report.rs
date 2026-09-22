@@ -284,13 +284,19 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> ReportFormatte
         match terms_vec.as_slice() {
             [] => "version solving failed".into(),
             // TODO: special case when that unique package is root.
-            [(package, Term::Positive(range))] => format!("{package} {range} is forbidden"),
-            [(package, Term::Negative(range))] => format!("{package} {range} is mandatory"),
-            [(p1, Term::Positive(r1)), (p2, Term::Negative(r2))] => self.format_external(
-                &External::<_, _, M>::FromDependencyOf(p1, r1.clone(), p2, r2.clone()),
+            [(package, term)] => {
+                let requirement = if term.negative {
+                    "mandatory"
+                } else {
+                    "forbidden"
+                };
+                format!("{package} {} is {requirement}", term.set)
+            }
+            [(p1, t1), (p2, t2)] if !t1.negative && t2.negative => self.format_external(
+                &External::<_, _, M>::FromDependencyOf(p1, t1.set.clone(), p2, t2.set.clone()),
             ),
-            [(p1, Term::Negative(r1)), (p2, Term::Positive(r2))] => self.format_external(
-                &External::<_, _, M>::FromDependencyOf(p2, r2.clone(), p1, r1.clone()),
+            [(p1, t1), (p2, t2)] if t1.negative && !t2.negative => self.format_external(
+                &External::<_, _, M>::FromDependencyOf(p2, t2.set.clone(), p1, t1.set.clone()),
             ),
             slice => {
                 let str_terms: Vec<_> = slice.iter().map(|(p, t)| format!("{p} {t}")).collect();

@@ -125,7 +125,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         Self {
             package_terms: SmallMap::One([(
                 package,
-                Term::Negative(VS::singleton(version.clone())),
+                Term::negative(VS::singleton(version.clone())),
             )]),
             kind: Kind::NotRoot(package, version),
             contradiction_cache: ContradictionCache::not_contradicted(),
@@ -135,7 +135,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     /// Create an incompatibility to remember that a given set does not contain any version.
     pub(crate) fn no_versions(package: Id<P>, versions: VS) -> Self {
         Self {
-            package_terms: SmallMap::One([(package, Term::Positive(versions.clone()))]),
+            package_terms: SmallMap::One([(package, Term::positive(versions.clone()))]),
             kind: Kind::NoVersions(package, versions),
             contradiction_cache: ContradictionCache::not_contradicted(),
         }
@@ -144,7 +144,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     /// Create an incompatibility for a reason outside pubgrub.
     pub(crate) fn custom(package: Id<P>, versions: VS, metadata: M) -> Self {
         Self {
-            package_terms: SmallMap::One([(package, Term::Positive(versions.clone()))]),
+            package_terms: SmallMap::One([(package, Term::positive(versions.clone()))]),
             kind: Kind::Custom(package, versions, metadata),
             contradiction_cache: ContradictionCache::not_contradicted(),
         }
@@ -155,17 +155,17 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         let (p2, set2) = dep;
         Self {
             package_terms: if set2 == VS::empty() {
-                SmallMap::One([(package, Term::Positive(versions))])
+                SmallMap::One([(package, Term::positive(versions))])
             } else if package == p2 {
                 // Track incompatible self-dependencies.
                 // Possible and impossible self-dependencies may have overlapping version ranges,
                 // incompatible is only the impossible one.
                 let incompatible = versions.difference(&set2);
-                SmallMap::One([(package, Term::Positive(incompatible))])
+                SmallMap::One([(package, Term::positive(incompatible))])
             } else {
                 SmallMap::Two([
-                    (package, Term::Positive(versions)),
-                    (p2, Term::Negative(set2)),
+                    (package, Term::positive(versions)),
+                    (p2, Term::negative(set2)),
                 ])
             },
             kind: Kind::FromDependencyOf(package, p2),
@@ -176,12 +176,12 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     fn dependency_terms(&self, p1: Id<P>, p2: Id<P>) -> (&VS, Option<&VS>) {
         let mut terms = self.package_terms.iter();
         let versions = match terms.next() {
-            Some((term_package, Term::Positive(versions))) if *term_package == p1 => versions,
+            Some((term_package, term)) if *term_package == p1 && !term.negative => &term.set,
             _ => panic!("dependency incompatibility must start with its positive term"),
         };
         let dependency_versions = match terms.next() {
             None => None,
-            Some((term_package, Term::Negative(versions))) if *term_package == p2 => Some(versions),
+            Some((term_package, term)) if *term_package == p2 && term.negative => Some(&term.set),
             _ => panic!("dependency incompatibility must end with its negative term"),
         };
         assert!(
@@ -261,11 +261,12 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         incompat: Id<Self>,
         satisfier_cause: Id<Self>,
         package: Id<P>,
+        term: Term<VS>,
         incompatibility_store: &Arena<Self>,
     ) -> Self {
         let kind = Kind::DerivedFrom(incompat, satisfier_cause);
-        // Optimization to avoid cloning and dropping t1
-        let (t1, mut package_terms) = incompatibility_store[incompat]
+        // The union of the terms for this package was already computed during satisfier search.
+        let (_, mut package_terms) = incompatibility_store[incompat]
             .package_terms
             .split_one(&package)
             .unwrap();
@@ -274,7 +275,6 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
             satisfier_cause_terms.iter().filter(|(p, _)| p != &&package),
             |t1, t2| Some(t1.intersection(t2)),
         );
-        let term = t1.union(satisfier_cause_terms.get(&package).unwrap());
         if term != Term::any() {
             package_terms.insert(package, term);
         }
@@ -429,26 +429,28 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         match self.iter().collect::<Vec<_>>().as_slice() {
             [] => "version solving failed".into(),
             // TODO: special case when that unique package is root.
-            [(package, Term::Positive(range))] => {
-                format!("{} {} is forbidden", package_store[*package], range)
+            [(package, term)] => {
+                let requirement = if term.negative {
+                    "mandatory"
+                } else {
+                    "forbidden"
+                };
+                format!("{} {} is {requirement}", package_store[*package], term.set)
             }
-            [(package, Term::Negative(range))] => {
-                format!("{} {} is mandatory", package_store[*package], range)
+            [(p1, t1), (p2, t2)] if t1.negative != t2.negative => {
+                let ((p_pos, t_pos), (p_neg, t_neg)) = if t1.negative {
+                    ((p2, t2), (p1, t1))
+                } else {
+                    ((p1, t1), (p2, t2))
+                };
+                External::<_, _, M>::FromDependencyOf(
+                    &package_store[*p_pos],
+                    t_pos.set.clone(),
+                    &package_store[*p_neg],
+                    t_neg.set.clone(),
+                )
+                .to_string()
             }
-            [
-                (p_pos, Term::Positive(r_pos)),
-                (p_neg, Term::Negative(r_neg)),
-            ]
-            | [
-                (p_neg, Term::Negative(r_neg)),
-                (p_pos, Term::Positive(r_pos)),
-            ] => External::<_, _, M>::FromDependencyOf(
-                &package_store[*p_pos],
-                r_pos.clone(),
-                &package_store[*p_neg],
-                r_neg.clone(),
-            )
-            .to_string(),
             slice => {
                 let str_terms: Vec<_> = slice
                     .iter()
@@ -571,7 +573,8 @@ pub(crate) mod tests {
             i3.insert(p1, t1);
             i3.insert(p3, t3);
 
-            let i_resolution = Incompatibility::prior_cause(i1, i2, p2, &store);
+            let resolved_term = store[i1].get(p2).unwrap().union(store[i2].get(p2).unwrap());
+            let i_resolution = Incompatibility::prior_cause(i1, i2, p2, resolved_term, &store);
             assert_eq!(i_resolution.package_terms.iter().map(|(&k, v)|(k, v.clone())).collect::<Map<_, _>>(), i3);
         }
 
