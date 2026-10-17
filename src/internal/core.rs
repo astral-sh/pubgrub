@@ -174,6 +174,7 @@ impl<DP: DependencyProvider> State<DP> {
     }
 
     /// Record a dependency constraint without deciding a package version.
+    #[cfg(feature = "unstable-state-api")]
     pub fn add_dependency(
         &mut self,
         package: Id<DP::P>,
@@ -189,6 +190,7 @@ impl<DP: DependencyProvider> State<DP> {
     ///
     /// Dependent versions with the same dependency range may be merged. Learned
     /// incompatibilities and unavailable-version reasons are excluded.
+    #[cfg(feature = "unstable-state-api")]
     pub fn dependencies(
         &self,
         package: Id<DP::P>,
@@ -423,6 +425,7 @@ impl<DP: DependencyProvider> State<DP> {
     ///
     /// Returns the number of the decisions that were backtracked, or `None` if the package was not
     /// decided on yet.
+    #[cfg(feature = "unstable-state-api")]
     pub fn backtrack_package(&mut self, package: Id<DP::P>) -> Option<u32> {
         let base_decision_level = self.partial_solution.current_decision_level();
         let new_decision_level = self.partial_solution.backtrack_package(package).ok()?;
