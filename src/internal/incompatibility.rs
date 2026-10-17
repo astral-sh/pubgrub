@@ -735,9 +735,8 @@ pub(crate) mod tests {
             state.unit_propagation(state.root_package).unwrap();
 
             // Add a package that depends on itself twice
-            let (next, _) = state
-                .partial_solution
-                .pick_highest_priority_pkg(|_p, _r| (0, Reverse(0)))
+            let next = state
+                .pick_highest_priority_pkg(|_p, _package, _r| (0, Reverse(0)))
                 .unwrap();
             state.add_package_version_dependencies(
                 next,
@@ -749,13 +748,11 @@ pub(crate) mod tests {
 
             assert!(
                 state
-                    .partial_solution
-                    .pick_highest_priority_pkg(|_p, _r| (0, Reverse(0)))
+                    .pick_highest_priority_pkg(|_p, _package, _r| (0, Reverse(0)))
                     .is_none()
             );
 
             let solution: BTreeMap<String, usize> = state
-                .partial_solution
                 .extract_solution()
                 .map(|(p, v)| (state.package_store[p].clone(), v))
                 .collect();

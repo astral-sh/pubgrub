@@ -213,27 +213,24 @@ pub fn resolve<DP: DependencyProvider>(
 
         debug!(
             "Partial solution after unit propagation: {}",
-            state.partial_solution.display(&state.package_store)
+            state.display_partial_solution()
         );
 
-        let Some((highest_priority_pkg, term_intersection)) =
-            state.partial_solution.pick_highest_priority_pkg(|p, r| {
-                dependency_provider.prioritize(
-                    &state.package_store[p],
-                    r,
-                    conflict_tracker.entry(p).or_default(),
-                )
-            })
-        else {
+        let Some(highest_priority_pkg) = state.pick_highest_priority_pkg(|p, package, r| {
+            dependency_provider.prioritize(package, r, conflict_tracker.entry(p).or_default())
+        }) else {
             return Ok(SelectedDependencies(
                 state
-                    .partial_solution
                     .extract_solution()
                     .map(|(p, v)| (state.package_store[p].clone(), v))
                     .collect(),
             ));
         };
         next = highest_priority_pkg;
+        let term_intersection = state
+            .term_intersection_for_package(next)
+            .expect("selected package must have a positive term")
+            .unwrap_positive();
 
         let decision = dependency_provider
             .choose_version(&state.package_store[next], term_intersection)
@@ -264,8 +261,7 @@ pub fn resolve<DP: DependencyProvider>(
             );
         }
 
-        let is_new_dependency =
-            added_dependencies.insert(next, v.clone(), state.partial_solution.has_backtracked());
+        let is_new_dependency = added_dependencies.insert(next, v.clone(), state.has_backtracked());
 
         if is_new_dependency {
             // Retrieve that package dependencies.
@@ -309,7 +305,7 @@ pub fn resolve<DP: DependencyProvider>(
                 "add_decision (not first time): {:?} = '{}' @ {}",
                 next, state.package_store[next], v
             );
-            state.partial_solution.add_decision(next, v);
+            state.add_decision(next, v);
         }
     }
 }
