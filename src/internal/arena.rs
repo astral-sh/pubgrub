@@ -2,7 +2,8 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
-use std::ops::{Index, IndexMut, Range};
+use std::ops::{Index, Range};
+use std::sync::Arc;
 
 type FnvIndexSet<V> = indexmap::IndexSet<V, rustc_hash::FxBuildHasher>;
 
@@ -77,22 +78,33 @@ impl<T> Id<T> {
     }
 }
 
-/// Yet another index-based arena.
+/// An append-only arena whose completed chunks are shared by cloned solver states.
 ///
-/// An arena is a kind of simple grow-only allocator, backed by a `Vec`
-/// where all items have the same lifetime, making it easier
-/// to have references between those items.
-/// They are all dropped at once when the arena is dropped.
-#[derive(Clone, PartialEq, Eq)]
+/// Appending to a shared partial chunk copies at most [`ARENA_CHUNK_SIZE`] records. Existing
+/// records are immutable, so propagation never copies a chunk.
+#[derive(PartialEq, Eq)]
 pub struct Arena<T> {
-    data: Vec<T>,
+    chunks: Vec<Arc<Vec<T>>>,
+    len: usize,
+}
+
+/// Bound the amount copied when two forks append to the same partial chunk.
+const ARENA_CHUNK_SIZE: usize = 256;
+
+impl<T> Clone for Arena<T> {
+    fn clone(&self) -> Self {
+        Self {
+            chunks: self.chunks.clone(),
+            len: self.len,
+        }
+    }
 }
 
 impl<T: fmt::Debug> fmt::Debug for Arena<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("Arena")
-            .field("len", &self.data.len())
-            .field("data", &self.data)
+            .field("len", &self.len)
+            .field("chunks", &self.chunks)
             .finish()
     }
 }
@@ -105,22 +117,40 @@ impl<T> Default for Arena<T> {
 
 impl<T> Arena<T> {
     pub(crate) fn new() -> Self {
-        Self { data: Vec::new() }
+        Self {
+            chunks: Vec::new(),
+            len: 0,
+        }
     }
+}
 
+impl<T: Clone> Arena<T> {
+    /// Append a record without copying any completed chunk.
     pub(crate) fn alloc(&mut self, value: T) -> Id<T> {
-        let id = Id::from_usize(self.data.len());
-        self.data.push(value);
+        let id = Id::from_usize(self.len);
+        let chunk_index = self.len / ARENA_CHUNK_SIZE;
+        if chunk_index == self.chunks.len() {
+            self.chunks
+                .push(Arc::new(Vec::with_capacity(ARENA_CHUNK_SIZE)));
+        }
+        let chunk = Arc::make_mut(&mut self.chunks[chunk_index]);
+        // A copied Vec retains only its length as capacity. Reserve the chunk's fixed capacity
+        // so its next append cannot double an almost-full allocation.
+        if chunk.capacity() < ARENA_CHUNK_SIZE {
+            chunk.reserve_exact(ARENA_CHUNK_SIZE - chunk.len());
+        }
+        chunk.push(value);
+        self.len += 1;
         id
     }
 
+    /// Append records in order and return their contiguous logical ID range.
     pub(crate) fn alloc_iter<I: Iterator<Item = T>>(&mut self, values: I) -> Range<Id<T>> {
-        let start = Id::from_usize(self.data.len());
-        self.data.reserve(values.size_hint().0);
+        let start = Id::from_usize(self.len);
         values.for_each(|v| {
             self.alloc(v);
         });
-        let end = Id::from_usize(self.data.len());
+        let end = Id::from_usize(self.len);
         Range { start, end }
     }
 }
@@ -128,20 +158,8 @@ impl<T> Arena<T> {
 impl<T> Index<Id<T>> for Arena<T> {
     type Output = T;
     fn index(&self, id: Id<T>) -> &T {
-        &self.data[id.into_raw()]
-    }
-}
-
-impl<T> IndexMut<Id<T>> for Arena<T> {
-    fn index_mut(&mut self, id: Id<T>) -> &mut Self::Output {
-        &mut self.data[id.into_raw()]
-    }
-}
-
-impl<T> Index<Range<Id<T>>> for Arena<T> {
-    type Output = [T];
-    fn index(&self, id: Range<Id<T>>) -> &[T] {
-        &self.data[id.start.into_raw()..id.end.into_raw()]
+        let index = id.into_raw();
+        &self.chunks[index / ARENA_CHUNK_SIZE][index % ARENA_CHUNK_SIZE]
     }
 }
 
@@ -198,7 +216,9 @@ impl<T: Hash + Eq> Index<Id<T>> for HashArena<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Arena, Id};
+    use std::sync::Arc;
+
+    use super::{ARENA_CHUNK_SIZE, Arena, Id};
 
     #[test]
     fn alloc_iter_preserves_order_and_duplicates() {
@@ -223,7 +243,49 @@ mod tests {
         let empty = arena.alloc_iter(std::iter::empty::<String>());
         assert_eq!(empty.start.into_raw(), 4);
         assert_eq!(empty.end.into_raw(), 4);
-        assert_eq!(arena.data.len(), 4);
+        assert_eq!(arena.len, 4);
         assert_eq!(arena[existing], "existing");
+    }
+
+    #[test]
+    fn cloned_arenas_share_full_chunks_and_isolate_appends() {
+        let mut arena = Arena::new();
+        let records = arena.alloc_iter(0..ARENA_CHUNK_SIZE + 1);
+        let mut sibling = arena.clone();
+        assert!(Arc::ptr_eq(&arena.chunks[0], &sibling.chunks[0]));
+        assert!(Arc::ptr_eq(&arena.chunks[1], &sibling.chunks[1]));
+
+        let first = arena.alloc(1000);
+        let second = sibling.alloc(2000);
+        assert_eq!(first, second);
+        assert_eq!(arena[first], 1000);
+        assert_eq!(sibling[second], 2000);
+        assert!(Arc::ptr_eq(&arena.chunks[0], &sibling.chunks[0]));
+        assert!(!Arc::ptr_eq(&arena.chunks[1], &sibling.chunks[1]));
+        for id in Id::range_to_iter(records) {
+            assert_eq!(arena[id], id.into_raw());
+            assert_eq!(sibling[id], id.into_raw());
+        }
+    }
+
+    #[test]
+    fn appending_at_chunk_boundary_does_not_copy_existing_records() {
+        #[derive(Debug, PartialEq, Eq)]
+        struct ImmutableRecord(usize);
+
+        impl Clone for ImmutableRecord {
+            fn clone(&self) -> Self {
+                panic!("completed chunks must not clone records");
+            }
+        }
+
+        let mut arena = Arena::new();
+        arena.alloc_iter((0..ARENA_CHUNK_SIZE).map(ImmutableRecord));
+        let mut sibling = arena.clone();
+        let first = arena.alloc(ImmutableRecord(1000));
+        let second = sibling.alloc(ImmutableRecord(2000));
+        assert_eq!(arena[first], ImmutableRecord(1000));
+        assert_eq!(sibling[second], ImmutableRecord(2000));
+        assert!(Arc::ptr_eq(&arena.chunks[0], &sibling.chunks[0]));
     }
 }
