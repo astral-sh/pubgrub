@@ -62,6 +62,10 @@ enum Kind<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// We can merge multiple dependents with the same version. For example, if a@1 depends on b and
     /// a@2 depends on b, we can say instead a@1||2 depends on b.
     FromDependencyOf(Id<P>, Id<P>),
+    /// A self-dependency whose original ranges cannot be recovered from its merged term.
+    ///
+    /// Keep these uncommon diagnostic ranges out of line.
+    FromSelfDependencyOf(Id<P>, Box<(VS, VS)>),
     /// Derived from two causes. Stores cause ids.
     ///
     /// For example, if a -> b and b -> c, we can derive a -> c.
@@ -122,15 +126,18 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     /// Build an incompatibility from a given dependency.
     pub(crate) fn from_dependency(package: Id<P>, versions: VS, dep: (Id<P>, VS)) -> Self {
         let (p2, set2) = dep;
+        if package == p2 && set2 != VS::empty() {
+            // Only the impossible part participates in propagation. Retain both original ranges
+            // separately so diagnostics can describe the dependency that caused the conflict.
+            let incompatible = versions.difference(&set2);
+            return Self {
+                package_terms: SmallMap::One([(package, Term::Positive(incompatible))]),
+                kind: Kind::FromSelfDependencyOf(package, Box::new((versions, set2))),
+            };
+        }
         Self {
             package_terms: if set2 == VS::empty() {
                 SmallMap::One([(package, Term::Positive(versions))])
-            } else if package == p2 {
-                // Track incompatible self-dependencies.
-                // Possible and impossible self-dependencies may have overlapping version ranges,
-                // incompatible is only the impossible one.
-                let incompatible = versions.difference(&set2);
-                SmallMap::One([(package, Term::Positive(incompatible))])
             } else {
                 SmallMap::Two([
                     (package, Term::Positive(versions)),
@@ -162,11 +169,20 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     pub(crate) fn as_dependency(&self) -> Option<(Id<P>, Id<P>)> {
         match &self.kind {
             Kind::FromDependencyOf(p1, p2) => Some((*p1, *p2)),
+            Kind::FromSelfDependencyOf(package, _) => Some((*package, *package)),
             _ => None,
         }
     }
 
     pub(crate) fn dependency(&self) -> Option<Dependency<'_, P, VS>> {
+        if let Kind::FromSelfDependencyOf(package, ranges) = &self.kind {
+            return Some(Dependency {
+                dependent: *package,
+                dependent_versions: &ranges.0,
+                dependency: *package,
+                dependency_versions: Some(&ranges.1),
+            });
+        }
         let (dependent, dependency) = self.as_dependency()?;
         let (dependent_versions, dependency_versions) =
             self.dependency_terms(dependent, dependency);
@@ -322,7 +338,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 package_store[package].clone(),
                 set.clone(),
             )),
-            Kind::FromDependencyOf(_, _) => {
+            Kind::FromDependencyOf(_, _) | Kind::FromSelfDependencyOf(_, _) => {
                 let dependency = store[self_id]
                     .dependency()
                     .expect("expected a dependency incompatibility");
@@ -584,17 +600,18 @@ pub(crate) mod tests {
             &empty,
         );
 
-        // Self-dependencies retain only the forbidden versions and an empty dependency range.
+        // Propagation merges self-dependency terms, but diagnostics retain the original ranges.
+        let self_dependency_versions = Ranges::between(2usize, 4usize);
         assert_dependency_tree(
             &package_store,
             Incompatibility::from_dependency(
                 package,
                 versions.clone(),
-                (package, Ranges::between(2usize, 4usize)),
+                (package, self_dependency_versions.clone()),
             ),
-            &Ranges::between(1usize, 2usize),
+            &versions,
             "package",
-            &empty,
+            &self_dependency_versions,
         );
 
         let first: Incompatibility<String, Ranges<usize>, String> =
