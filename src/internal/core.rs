@@ -142,9 +142,7 @@ impl<DP: DependencyProvider> State<DP> {
     }
 
     /// Add an incompatibility to the state.
-    pub fn add_incompatibility(&mut self, mut incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
-        // Cached contradictions are only valid in the state that recorded them.
-        incompat.reset_contradiction_cache();
+    pub fn add_incompatibility(&mut self, incompat: Incompatibility<DP::P, DP::VS, DP::M>) {
         let id = self.incompatibility_store.alloc(incompat);
         self.merge_incompatibility(id);
     }
@@ -225,10 +223,7 @@ impl<DP: DependencyProvider> State<DP> {
             let mut conflict_id = None;
             // We only care about incompatibilities if it contains the current package.
             for &incompat_id in self.incompatibilities[&current_package].iter().rev() {
-                if self
-                    .partial_solution
-                    .is_contradicted(&self.incompatibility_store[incompat_id])
-                {
+                if self.partial_solution.is_contradicted(incompat_id) {
                     continue;
                 }
                 let current_incompat = &self.incompatibility_store[incompat_id];
@@ -258,12 +253,10 @@ impl<DP: DependencyProvider> State<DP> {
                             &self.incompatibility_store,
                         );
                         // With the partial solution updated, the incompatibility is now contradicted.
-                        self.partial_solution
-                            .mark_contradicted(&mut self.incompatibility_store[incompat_id]);
+                        self.partial_solution.mark_contradicted(incompat_id);
                     }
                     Relation::Contradicted(_) => {
-                        self.partial_solution
-                            .mark_contradicted(&mut self.incompatibility_store[incompat_id]);
+                        self.partial_solution.mark_contradicted(incompat_id);
                     }
                     _ => {}
                 }
@@ -284,8 +277,7 @@ impl<DP: DependencyProvider> State<DP> {
                 );
                 // After conflict resolution and the partial solution update,
                 // the root cause incompatibility is now contradicted.
-                self.partial_solution
-                    .mark_contradicted(&mut self.incompatibility_store[root_cause]);
+                self.partial_solution.mark_contradicted(root_cause);
             }
         }
         // If there are no more changed packages, unit propagation is done.
