@@ -7,6 +7,8 @@ use std::collections::HashSet as Set;
 use std::hash::{BuildHasher, Hash};
 use std::sync::Arc;
 
+#[cfg(feature = "unstable-state-api")]
+use crate::internal::arena::ArenaCheckpoint;
 use crate::internal::{
     Arena, DecisionLevel, HashArena, Id, IncompDpId, Incompatibility, PartialSolution, Relation,
     SatisfierSearch, SmallVec,
@@ -93,7 +95,7 @@ pub struct State<DP: DependencyProvider> {
 
     /// A suspended state keeps its prefix token while the active branch owns the records.
     #[cfg(feature = "unstable-state-api")]
-    incompatibility_checkpoint: Option<super::arena::ArenaCheckpoint>,
+    incompatibility_checkpoint: Option<ArenaCheckpoint>,
 
     /// The store is the reference storage for all packages.
     pub package_store: HashArena<DP::P>,
