@@ -49,8 +49,6 @@ version-ranges = { version = "0.2.3", path = "version-ranges", package = "astral
 
 [features]
 serde = ["dep:serde", "version-ranges/serde"]
-# Expose the unstable API for driving solver state directly.
-unstable-state-api = []
 
 [[bench]]
 name = "backtracking"

@@ -8,6 +8,77 @@ use std::convert::Infallible;
 
 type NumVS = Ranges<u32>;
 
+/// Sibling forks can contradict the same incompatibility at different decision levels.
+#[test]
+fn cloned_states_keep_contradiction_caches_independent() {
+    use pubgrub::State;
+
+    type Provider = OfflineDependencyProvider<String, NumVS>;
+
+    let mut base: State<Provider> = State::init("root".to_string(), 0);
+    base.unit_propagation(base.root_package).unwrap();
+    base.add_package_version_dependencies(
+        base.root_package,
+        0,
+        Ranges::singleton(0u32),
+        [("foo".to_string(), Ranges::full())],
+    );
+    base.unit_propagation(base.root_package).unwrap();
+    let foo = base.package_store.alloc("foo".to_string());
+    base.add_unavailable(
+        foo,
+        Ranges::singleton(1u32),
+        "foo 1 is unavailable".to_string(),
+    );
+
+    let mut sibling = base.clone();
+    base.add_package_version_dependencies(foo, 2, Ranges::singleton(2u32), []);
+    assert!(
+        base.unit_propagation(foo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .is_none()
+    );
+
+    sibling.add_package_version_dependencies(foo, 1, Ranges::singleton(1u32), []);
+    assert!(
+        sibling
+            .unit_propagation(foo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .is_some()
+    );
+    assert!(
+        base.unit_propagation(foo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .is_none()
+    );
+
+    // Inherit a valid cached contradiction, then invalidate it only in the new fork.
+    let mut backtracked = base.clone();
+    assert_eq!(backtracked.backtrack_package(foo), Some(1));
+    backtracked.add_package_version_dependencies(foo, 1, Ranges::singleton(1u32), []);
+    assert!(
+        backtracked
+            .unit_propagation(foo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .is_some()
+    );
+    assert!(
+        base.unit_propagation(foo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .is_none()
+    );
+}
+
 #[test]
 fn same_result_on_repeated_runs() {
     let mut dependency_provider = OfflineDependencyProvider::<_, NumVS>::new();
