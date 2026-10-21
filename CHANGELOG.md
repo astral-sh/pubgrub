@@ -4,13 +4,27 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.7.0 - 2026-10-21
+
 ### Breaking
 
-- Make `Term::unwrap_positive` crate-private. Match on `Term::Positive` to borrow its version set instead.
+- Gate the direct solver state API behind the `unstable-state-api` feature. Enable this feature to use `State`, `Id`, `ConflictId`, and `Dependency` ([#88](https://github.com/astral-sh/pubgrub/pull/88)).
+- Replace public incompatibility internals (`IncompId`, `Incompatibility`, `Kind`, and the incompatibility stores on `State`) with opaque `ConflictId` handles and borrowed `Dependency` views. Use `State::dependencies` and `State::conflict_packages` for inspection, and `State::add_dependency`, `State::add_no_versions`, and `State::add_unavailable` to record constraints ([#80](https://github.com/astral-sh/pubgrub/pull/80)).
+- Make `Term::unwrap_positive` crate-private. Match on `Term::Positive` to borrow its version set instead ([#86](https://github.com/astral-sh/pubgrub/pull/86)).
 
 ### Added
 
-- Add `VersionSet::contains_many`, forwarded to `Ranges::contains_many` for `Ranges`, and use it in `OfflineDependencyProvider::prioritize` to count matching versions in one pass over the sorted versions.
+- Add `VersionSet::contains_many`, forwarded to `Ranges::contains_many` for `Ranges`, and use it in `OfflineDependencyProvider::prioritize` to count matching versions in one pass over the sorted versions ([#433](https://github.com/pubgrub-rs/pubgrub/pull/433)).
+
+### Changed
+
+- Update to astral-version-ranges 0.2.3, which formats singleton ranges as `1` instead of `==1` ([#81](https://github.com/astral-sh/pubgrub/pull/81)).
+- Stop collapsing custom reasons in `DerivationTree::collapse_no_versions` ([#83](https://github.com/astral-sh/pubgrub/pull/83)).
+
+### Fixed
+
+- Reject undecided packages in `State::backtrack_package` without changing backtracking state ([#82](https://github.com/astral-sh/pubgrub/pull/82)).
+- Preserve required dependencies when a package version has an incompatible self-dependency ([#455](https://github.com/pubgrub-rs/pubgrub/pull/455)).
 
 ## 0.6.1 - 2026-08-07
 

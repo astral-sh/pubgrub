@@ -2,6 +2,14 @@
 
 Changelog for the version-ranges crate.
 
+## Unreleased
+
+## v0.2.3 - 2026-10-21
+
+### Changed
+
+- Format singleton ranges as `1` instead of `==1`, matching upstream ([#81](https://github.com/astral-sh/pubgrub/pull/81)).
+
 ## v0.2.2 - 2026-08-07
 
 ### Added
