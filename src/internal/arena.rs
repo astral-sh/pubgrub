@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
 use std::ops::{Index, IndexMut, Range};
+use std::sync::Arc;
 
 type FnvIndexSet<V> = indexmap::IndexSet<V, rustc_hash::FxBuildHasher>;
 
@@ -85,7 +86,8 @@ impl<T> Id<T> {
 /// They are all dropped at once when the arena is dropped.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Arena<T> {
-    data: Vec<T>,
+    // Forks share each record until one of them updates its contradiction cache.
+    data: Vec<Arc<T>>,
 }
 
 impl<T: fmt::Debug> fmt::Debug for Arena<T> {
@@ -110,7 +112,7 @@ impl<T> Arena<T> {
 
     pub(crate) fn alloc(&mut self, value: T) -> Id<T> {
         let id = Id::from_usize(self.data.len());
-        self.data.push(value);
+        self.data.push(Arc::new(value));
         id
     }
 
@@ -132,16 +134,9 @@ impl<T> Index<Id<T>> for Arena<T> {
     }
 }
 
-impl<T> IndexMut<Id<T>> for Arena<T> {
+impl<T: Clone> IndexMut<Id<T>> for Arena<T> {
     fn index_mut(&mut self, id: Id<T>) -> &mut Self::Output {
-        &mut self.data[id.into_raw()]
-    }
-}
-
-impl<T> Index<Range<Id<T>>> for Arena<T> {
-    type Output = [T];
-    fn index(&self, id: Range<Id<T>>) -> &[T] {
-        &self.data[id.start.into_raw()..id.end.into_raw()]
+        Arc::make_mut(&mut self.data[id.into_raw()])
     }
 }
 
