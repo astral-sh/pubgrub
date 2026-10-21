@@ -1,0 +1,83 @@
+# Publish one crate through the release gate, then create its release tag.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: Crate to release
+        required: true
+        type: choice
+        options:
+          - pubgrub
+          - version-ranges
+
+permissions: {}
+
+jobs:
+  release-gate:
+    # N.B. This name must match services/environment-gate.json.
+    name: release-gate
+    if: github.repository == 'astral-sh/pubgrub' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: release-gate
+    permissions: {}
+    steps:
+      - run: echo "Release approved"
+
+  publish-crates:
+    name: Publish to crates.io
+    needs: release-gate
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Read release tag from Cargo
+        id: tag
+        run: |
+          version="$(cargo metadata --no-deps --format-version 1 |
+            jq -er --arg package "astral-${CRATE}" '.packages[] | select(.name == $package) | .version')"
+          echo "tag=${CRATE}-v${version}" >> "$GITHUB_OUTPUT"
+        env:
+          CRATE: ${{ inputs.crate }}
+
+      - uses: rust-lang/crates-io-auth-action@b7e9a28eded4986ec6b1fa40eeee8f8f165559ec # v1.0.3
+        id: auth
+
+      - name: Publish pubgrub
+        if: inputs.crate == 'pubgrub'
+        run: cargo publish --manifest-path Cargo.toml
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+      - name: Publish version-ranges
+        if: inputs.crate == 'version-ranges'
+        run: cargo publish --manifest-path version-ranges/Cargo.toml
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  publish-tag:
+    name: Create release tag
+    # The release deployment must succeed before the tag ruleset permits creation.
+    needs: publish-crates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Create tag at the approved commit
+        run: |
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f "ref=refs/tags/${TAG}" -f "sha=${RELEASE_COMMIT}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          TAG: ${{ needs.publish-crates.outputs.tag }}
