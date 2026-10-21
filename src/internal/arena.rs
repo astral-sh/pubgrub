@@ -2,7 +2,9 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
-use std::ops::{Index, IndexMut, Range};
+use std::ops::{Index, Range};
+#[cfg(feature = "unstable-state-api")]
+use std::sync::Arc;
 
 type FnvIndexSet<V> = indexmap::IndexSet<V, rustc_hash::FxBuildHasher>;
 
@@ -77,24 +79,20 @@ impl<T> Id<T> {
     }
 }
 
-/// Yet another index-based arena.
-///
-/// An arena is a kind of simple grow-only allocator, backed by a `Vec`
-/// where all items have the same lifetime, making it easier
-/// to have references between those items.
-/// They are all dropped at once when the arena is dropped.
-#[derive(Clone, PartialEq, Eq)]
+/// A contiguous arena that can discard a completed fork's suffix before its sibling runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Arena<T> {
     data: Vec<T>,
+    #[cfg(feature = "unstable-state-api")]
+    checkpoints: Vec<ArenaCheckpoint>,
 }
 
-impl<T: fmt::Debug> fmt::Debug for Arena<T> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt.debug_struct("Arena")
-            .field("len", &self.data.len())
-            .field("data", &self.data)
-            .finish()
-    }
+/// Identifies a live prefix; the token distinguishes stale checkpoints after IDs are reused.
+#[cfg(feature = "unstable-state-api")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ArenaCheckpoint {
+    len: usize,
+    token: Arc<()>,
 }
 
 impl<T> Default for Arena<T> {
@@ -105,7 +103,38 @@ impl<T> Default for Arena<T> {
 
 impl<T> Arena<T> {
     pub(crate) fn new() -> Self {
-        Self { data: Vec::new() }
+        Self {
+            data: Vec::new(),
+            #[cfg(feature = "unstable-state-api")]
+            checkpoints: Vec::new(),
+        }
+    }
+
+    /// Mark a prefix that remains valid until an earlier checkpoint is restored.
+    #[cfg(feature = "unstable-state-api")]
+    pub(crate) fn checkpoint(&mut self) -> ArenaCheckpoint {
+        let checkpoint = ArenaCheckpoint {
+            len: self.data.len(),
+            token: Arc::new(()),
+        };
+        self.checkpoints.push(checkpoint.clone());
+        checkpoint
+    }
+
+    /// Drop all records after a live checkpoint and invalidate descendant checkpoints.
+    ///
+    /// The caller must restore the solver indexes and assignment history from the same checkpoint
+    /// before reusing IDs in the discarded suffix. The allocation remains available for reuse.
+    #[cfg(feature = "unstable-state-api")]
+    pub(crate) fn rewind(&mut self, checkpoint: &ArenaCheckpoint) {
+        let position = self
+            .checkpoints
+            .iter()
+            .rposition(|candidate| Arc::ptr_eq(&candidate.token, &checkpoint.token))
+            .expect("arena checkpoint must belong to the current ancestor chain");
+        assert!(checkpoint.len <= self.data.len());
+        self.data.truncate(checkpoint.len);
+        self.checkpoints.truncate(position + 1);
     }
 
     pub(crate) fn alloc(&mut self, value: T) -> Id<T> {
@@ -114,9 +143,9 @@ impl<T> Arena<T> {
         id
     }
 
+    /// Append records in order and return their contiguous logical ID range.
     pub(crate) fn alloc_iter<I: Iterator<Item = T>>(&mut self, values: I) -> Range<Id<T>> {
         let start = Id::from_usize(self.data.len());
-        self.data.reserve(values.size_hint().0);
         values.for_each(|v| {
             self.alloc(v);
         });
@@ -129,19 +158,6 @@ impl<T> Index<Id<T>> for Arena<T> {
     type Output = T;
     fn index(&self, id: Id<T>) -> &T {
         &self.data[id.into_raw()]
-    }
-}
-
-impl<T> IndexMut<Id<T>> for Arena<T> {
-    fn index_mut(&mut self, id: Id<T>) -> &mut Self::Output {
-        &mut self.data[id.into_raw()]
-    }
-}
-
-impl<T> Index<Range<Id<T>>> for Arena<T> {
-    type Output = [T];
-    fn index(&self, id: Range<Id<T>>) -> &[T] {
-        &self.data[id.start.into_raw()..id.end.into_raw()]
     }
 }
 
@@ -225,5 +241,44 @@ mod tests {
         assert_eq!(empty.end.into_raw(), 4);
         assert_eq!(arena.data.len(), 4);
         assert_eq!(arena[existing], "existing");
+    }
+
+    #[cfg(feature = "unstable-state-api")]
+    #[test]
+    fn rewind_reuses_discarded_ids() {
+        let mut arena = Arena::new();
+        let prefix = arena.alloc("prefix");
+        let checkpoint = arena.checkpoint();
+        let suffix = arena.alloc("first branch");
+        arena.rewind(&checkpoint);
+        assert_eq!(arena[prefix], "prefix");
+        assert_eq!(arena.alloc("sibling"), suffix);
+    }
+
+    #[cfg(feature = "unstable-state-api")]
+    #[test]
+    #[should_panic(expected = "arena checkpoint must belong to the current ancestor chain")]
+    fn rewind_rejects_a_discarded_descendant_even_after_ids_are_reused() {
+        let mut arena = Arena::new();
+        arena.alloc(1);
+        let outer = arena.checkpoint();
+        arena.alloc(2);
+        let stale = arena.checkpoint();
+        arena.rewind(&outer);
+        arena.alloc(3);
+        let _replacement = arena.checkpoint();
+        arena.rewind(&stale);
+    }
+
+    #[cfg(feature = "unstable-state-api")]
+    #[test]
+    #[should_panic(expected = "arena checkpoint must belong to the current ancestor chain")]
+    fn rewind_rejects_a_checkpoint_from_another_arena() {
+        let mut first = Arena::new();
+        first.alloc(1);
+        let checkpoint = first.checkpoint();
+        let mut second = Arena::new();
+        second.alloc(1);
+        second.rewind(&checkpoint);
     }
 }

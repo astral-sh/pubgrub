@@ -18,5 +18,5 @@ pub(crate) use small_vec::SmallVec;
 // uv-specific additions
 pub use arena::Id;
 #[cfg(feature = "unstable-state-api")]
-pub use core::ConflictId;
+pub use core::{ConflictId, IncompatibilityArena};
 pub use core::{Dependency, State};

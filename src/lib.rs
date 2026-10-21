@@ -243,6 +243,6 @@ pub use version_set::VersionSet;
 
 // Unstable API for driving solver state directly.
 #[cfg(feature = "unstable-state-api")]
-pub use internal::{ConflictId, Dependency, Id, State};
+pub use internal::{ConflictId, Dependency, Id, IncompatibilityArena, State};
 
 mod internal;

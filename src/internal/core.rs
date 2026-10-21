@@ -7,6 +7,8 @@ use std::collections::HashSet as Set;
 use std::hash::{BuildHasher, Hash};
 use std::sync::Arc;
 
+#[cfg(feature = "unstable-state-api")]
+use crate::internal::arena::ArenaCheckpoint;
 use crate::internal::{
     Arena, DecisionLevel, HashArena, Id, IncompDpId, Incompatibility, PartialSolution, Relation,
     SatisfierSearch, SmallVec,
@@ -91,6 +93,10 @@ pub struct State<DP: DependencyProvider> {
     /// The store is the reference storage for all incompatibilities.
     incompatibility_store: Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
 
+    /// A suspended state keeps its prefix token while the active branch owns the records.
+    #[cfg(feature = "unstable-state-api")]
+    incompatibility_checkpoint: Option<ArenaCheckpoint>,
+
     /// The store is the reference storage for all packages.
     pub package_store: HashArena<DP::P>,
 
@@ -98,6 +104,36 @@ pub struct State<DP: DependencyProvider> {
     /// It can definitely be a local variable to that method, but
     /// this way we can reuse the same allocation for better performance.
     unit_propagation_buffer: SmallVec<Id<DP::P>>,
+}
+
+/// The single incompatibility allocation moved between depth-first solver branches.
+///
+/// A suspended [`State`] keeps only a checkpoint. Restore its arena before reading constraints
+/// or advancing the solver. Restoring an ancestor invalidates checkpoints in its old suffix.
+#[cfg(feature = "unstable-state-api")]
+pub struct IncompatibilityArena<DP: DependencyProvider> {
+    arena: Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
+}
+
+#[cfg(feature = "unstable-state-api")]
+impl<DP: DependencyProvider> Default for IncompatibilityArena<DP> {
+    fn default() -> Self {
+        Self {
+            arena: Arena::new(),
+        }
+    }
+}
+
+#[cfg(feature = "unstable-state-api")]
+impl<DP: DependencyProvider> IncompatibilityArena<DP> {
+    /// Release a completed branch's suffix before cloning the next suspended solver state.
+    pub fn rewind_to(&mut self, state: &State<DP>) {
+        let checkpoint = state
+            .incompatibility_checkpoint
+            .as_ref()
+            .expect("state must be suspended");
+        self.arena.rewind(checkpoint);
+    }
 }
 
 impl<DP: DependencyProvider> State<DP> {
@@ -118,10 +154,40 @@ impl<DP: DependencyProvider> State<DP> {
             incompatibilities,
             partial_solution: PartialSolution::empty(),
             incompatibility_store,
+            #[cfg(feature = "unstable-state-api")]
+            incompatibility_checkpoint: None,
             package_store,
             unit_propagation_buffer: SmallVec::Empty,
             merged_dependencies: MergedDependencies::default(),
         }
+    }
+
+    /// Suspend this state and transfer its records to the depth-first fork scheduler.
+    ///
+    /// Clones of the suspended state copy only solver state and its checkpoint, with no arena
+    /// records. The scheduler must restore the arena before querying or advancing any clone.
+    #[cfg(feature = "unstable-state-api")]
+    pub fn take_incompatibility_arena(&mut self) -> IncompatibilityArena<DP> {
+        assert!(
+            self.incompatibility_checkpoint.is_none(),
+            "state is already suspended"
+        );
+        self.incompatibility_checkpoint = Some(self.incompatibility_store.checkpoint());
+        IncompatibilityArena {
+            arena: std::mem::take(&mut self.incompatibility_store),
+        }
+    }
+
+    /// Resume a suspended state, discarding records created after its checkpoint.
+    ///
+    /// Pass the arena transferred from this state or one of its descendants. Siblings must run
+    /// depth-first: restoring an older prefix invalidates all descendant checkpoint tokens.
+    /// The suspended state's indexes and contradiction cache refer only to the retained prefix.
+    #[cfg(feature = "unstable-state-api")]
+    pub fn restore_incompatibility_arena(&mut self, mut arena: IncompatibilityArena<DP>) {
+        arena.rewind_to(self);
+        self.incompatibility_checkpoint = None;
+        self.incompatibility_store = arena.arena;
     }
 
     /// Add the dependencies for the version being decided of the current package as
@@ -258,10 +324,7 @@ impl<DP: DependencyProvider> State<DP> {
             let mut conflict_id = None;
             // We only care about incompatibilities if it contains the current package.
             for &incompat_id in self.incompatibilities[&current_package].iter().rev() {
-                if self
-                    .partial_solution
-                    .is_contradicted(&self.incompatibility_store[incompat_id])
-                {
+                if self.partial_solution.is_contradicted(incompat_id) {
                     continue;
                 }
                 let current_incompat = &self.incompatibility_store[incompat_id];
@@ -291,12 +354,10 @@ impl<DP: DependencyProvider> State<DP> {
                             &self.incompatibility_store,
                         );
                         // With the partial solution updated, the incompatibility is now contradicted.
-                        self.partial_solution
-                            .mark_contradicted(&mut self.incompatibility_store[incompat_id]);
+                        self.partial_solution.mark_contradicted(incompat_id);
                     }
                     Relation::Contradicted(_) => {
-                        self.partial_solution
-                            .mark_contradicted(&mut self.incompatibility_store[incompat_id]);
+                        self.partial_solution.mark_contradicted(incompat_id);
                     }
                     _ => {}
                 }
@@ -317,8 +378,7 @@ impl<DP: DependencyProvider> State<DP> {
                 );
                 // After conflict resolution and the partial solution update,
                 // the root cause incompatibility is now contradicted.
-                self.partial_solution
-                    .mark_contradicted(&mut self.incompatibility_store[root_cause]);
+                self.partial_solution.mark_contradicted(root_cause);
             }
         }
         // If there are no more changed packages, unit propagation is done.
@@ -775,5 +835,44 @@ mod tests {
         let dependency = state.package_store.alloc("dependency");
         assert_eq!(state.incompatibilities[&package].len(), 4);
         assert_eq!(state.incompatibilities[&dependency].len(), 4);
+    }
+}
+
+#[cfg(all(test, feature = "unstable-state-api"))]
+mod checkpoint_tests {
+    use super::State;
+    use crate::{OfflineDependencyProvider, Ranges};
+
+    type Provider = OfflineDependencyProvider<&'static str, Ranges<u32>>;
+
+    #[test]
+    fn nested_checkpoint_restores_dependencies_before_outer_sibling() {
+        let mut outer: State<Provider> = State::init("root", 1);
+        let arena = outer.take_incompatibility_arena();
+        let mut first = outer.clone();
+        first.restore_incompatibility_arena(arena);
+        let package = first.package_store.alloc("first");
+        first.add_dependency(
+            first.root_package,
+            Ranges::singleton(1u32),
+            (package, Ranges::singleton(2u32)),
+        );
+        let arena = first.take_incompatibility_arena();
+        let mut nested = first.clone();
+        nested.restore_incompatibility_arena(arena);
+        let other = nested.package_store.alloc("nested");
+        nested.add_dependency(
+            package,
+            Ranges::singleton(2u32),
+            (other, Ranges::singleton(3u32)),
+        );
+        let arena = nested.take_incompatibility_arena();
+        first.restore_incompatibility_arena(arena);
+        assert_eq!(first.dependencies(first.root_package).count(), 1);
+        assert_eq!(first.dependencies(package).count(), 1);
+        let arena = first.take_incompatibility_arena();
+        outer.restore_incompatibility_arena(arena);
+        assert_eq!(outer.dependencies(outer.root_package).count(), 0);
+        assert!(outer.unit_propagation(outer.root_package).is_ok());
     }
 }

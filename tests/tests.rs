@@ -8,6 +8,91 @@ use std::convert::Infallible;
 
 type NumVS = Ranges<u32>;
 
+/// Sibling forks can reuse incompatibility IDs without sharing cached contradictions.
+#[cfg(feature = "unstable-state-api")]
+#[test]
+fn sibling_forks_keep_contradiction_caches_independent() {
+    use pubgrub::State;
+
+    type Provider = OfflineDependencyProvider<&'static str, NumVS>;
+
+    let mut base: State<Provider> = State::init("root", 0);
+    base.unit_propagation(base.root_package).unwrap();
+    base.add_package_version_dependencies(
+        base.root_package,
+        0,
+        Ranges::singleton(0u32),
+        [("foo", Ranges::full())],
+    );
+    base.unit_propagation(base.root_package).unwrap();
+    let foo = base.package_store.alloc("foo");
+
+    let arena = base.take_incompatibility_arena();
+    let mut sibling = base.clone();
+    base.restore_incompatibility_arena(arena);
+    base.add_unavailable(
+        foo,
+        Ranges::singleton(1u32),
+        "foo 1 is unavailable".to_string(),
+    );
+    base.add_package_version_dependencies(foo, 2, Ranges::singleton(2u32), []);
+    assert!(
+        base.unit_propagation(foo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .is_none()
+    );
+
+    let mut first = base.clone();
+    let arena = base.take_incompatibility_arena();
+    sibling.restore_incompatibility_arena(arena);
+    // This incompatibility reuses the ID cached by the first branch.
+    sibling.add_unavailable(
+        foo,
+        Ranges::singleton(1u32),
+        "foo 1 is unavailable".to_string(),
+    );
+    sibling.add_package_version_dependencies(foo, 1, Ranges::singleton(1u32), []);
+    assert!(
+        sibling
+            .unit_propagation(foo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .is_some()
+    );
+    assert!(
+        first
+            .unit_propagation(foo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .is_none()
+    );
+
+    // Inherit a valid cached contradiction, then invalidate it only in the new fork.
+    let mut backtracked = first.clone();
+    assert_eq!(backtracked.backtrack_package(foo), Some(1));
+    backtracked.add_package_version_dependencies(foo, 1, Ranges::singleton(1u32), []);
+    assert!(
+        backtracked
+            .unit_propagation(foo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .is_some()
+    );
+    assert!(
+        first
+            .unit_propagation(foo)
+            .unwrap()
+            .into_iter()
+            .next()
+            .is_none()
+    );
+}
+
 #[test]
 fn same_result_on_repeated_runs() {
     let mut dependency_provider = OfflineDependencyProvider::<_, NumVS>::new();

@@ -60,6 +60,33 @@ impl Debug for DecisionLevel {
 // Preserve the niche so `Option<DecisionLevel>` stays as small as a bare `u32`.
 const _: () = assert!(std::mem::size_of::<Option<DecisionLevel>>() == std::mem::size_of::<u32>());
 
+#[derive(Debug, Clone)]
+struct ContradictionCache {
+    /// The decision level where this incompatibility became contradicted.
+    decision_level: DecisionLevel,
+    /// The backtrack generation for that decision level.
+    backtrack_generation: u32,
+}
+
+impl ContradictionCache {
+    fn not_contradicted() -> Self {
+        Self {
+            decision_level: DecisionLevel::MAX,
+            backtrack_generation: 0,
+        }
+    }
+
+    fn is_contradicted(&self, last_valid_decision_levels: &[DecisionLevel]) -> bool {
+        // The active generation has no backtrack target yet, so every contradiction recorded in
+        // it remains valid. Completed generations store the highest decision level that survived
+        // their first invalidating backtrack.
+        last_valid_decision_levels
+            .get(self.backtrack_generation as usize)
+            .map(|&level| self.decision_level <= level)
+            .unwrap_or(true)
+    }
+}
+
 /// The partial solution contains all package assignments,
 /// organized by package and historically ordered.
 #[derive(Clone, Debug)]
@@ -100,6 +127,9 @@ pub struct PartialSolution<DP: DependencyProvider> {
     /// For each completed backtrack generation, the highest decision level that remains valid.
     /// The active generation is represented by the missing entry after the end of this vector.
     last_valid_decision_levels: Vec<DecisionLevel>,
+    /// Cached contradictions belong to this partial solution, indexed by incompatibility ID.
+    /// Missing entries have not been marked contradicted.
+    contradiction_cache: Vec<ContradictionCache>,
 }
 
 /// A package assignment is either a decision or a list of (accumulated) derivations without a
@@ -207,24 +237,28 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             prioritized_potential_packages: PriorityQueue::default(),
             outdated_priorities: FnvIndexSet::default(),
             last_valid_decision_levels: vec![DecisionLevel::ZERO],
+            contradiction_cache: Vec::new(),
         }
     }
 
-    pub(crate) fn is_contradicted(
-        &self,
-        incompatibility: &Incompatibility<DP::P, DP::VS, DP::M>,
-    ) -> bool {
-        incompatibility.is_contradicted(&self.last_valid_decision_levels)
+    /// Return whether a cached contradiction remains valid after this fork's backtracks.
+    pub(crate) fn is_contradicted(&self, incompatibility: IncompDpId<DP>) -> bool {
+        self.contradiction_cache
+            .get(incompatibility.into_raw())
+            .is_some_and(|cache| cache.is_contradicted(&self.last_valid_decision_levels))
     }
 
-    pub(crate) fn mark_contradicted(
-        &self,
-        incompatibility: &mut Incompatibility<DP::P, DP::VS, DP::M>,
-    ) {
-        incompatibility.mark_contradicted(
-            self.current_decision_level(),
-            self.last_valid_decision_levels.len() as u32,
-        );
+    /// Cache a contradiction without mutating the shared incompatibility record.
+    pub(crate) fn mark_contradicted(&mut self, incompatibility: IncompDpId<DP>) {
+        let index = incompatibility.into_raw();
+        if self.contradiction_cache.len() <= index {
+            self.contradiction_cache
+                .resize(index + 1, ContradictionCache::not_contradicted());
+        }
+        self.contradiction_cache[index] = ContradictionCache {
+            decision_level: self.current_decision_level(),
+            backtrack_generation: self.last_valid_decision_levels.len() as u32,
+        };
     }
 
     /// Returns whether at least one backtrack generation has completed.
@@ -774,5 +808,36 @@ impl<VS: VersionSet> AssignmentsIntersection<VS> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contradiction_cache_tracks_backtrack_generations() {
+        let current_generation = ContradictionCache {
+            decision_level: DecisionLevel::new(3),
+            backtrack_generation: 1,
+        };
+
+        // A generation without a recorded backtrack target is still active.
+        assert!(current_generation.is_contradicted(&[DecisionLevel::ZERO]));
+        // Backtracking below the contradiction's decision level invalidates it.
+        assert!(!current_generation.is_contradicted(&[DecisionLevel::ZERO, DecisionLevel::new(2)]));
+        // Backtracking to or above that decision level preserves it.
+        assert!(current_generation.is_contradicted(&[DecisionLevel::ZERO, DecisionLevel::new(3)]));
+
+        let later_generation = ContradictionCache {
+            decision_level: DecisionLevel::new(5),
+            backtrack_generation: 2,
+        };
+        assert!(later_generation.is_contradicted(&[DecisionLevel::ZERO, DecisionLevel::new(3)]));
+        assert!(!later_generation.is_contradicted(&[
+            DecisionLevel::ZERO,
+            DecisionLevel::new(3),
+            DecisionLevel::new(4),
+        ]));
     }
 }
