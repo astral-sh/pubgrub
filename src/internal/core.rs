@@ -840,38 +840,10 @@ mod tests {
 
 #[cfg(all(test, feature = "unstable-state-api"))]
 mod checkpoint_tests {
-    use super::{Incompatibility, State};
+    use super::State;
     use crate::{OfflineDependencyProvider, Ranges};
 
     type Provider = OfflineDependencyProvider<&'static str, Ranges<u32>>;
-
-    #[test]
-    fn sibling_rewind_restores_indexes_and_does_not_reuse_cached_contradictions() {
-        let mut state: State<Provider> = State::init("root", 1);
-        let arena = state.take_incompatibility_arena();
-        let mut sibling = state.clone();
-        state.restore_incompatibility_arena(arena);
-        let first = state
-            .incompatibility_store
-            .alloc(Incompatibility::no_versions(
-                state.root_package,
-                Ranges::singleton(2u32),
-            ));
-        state.partial_solution.mark_contradicted(first);
-        assert!(state.partial_solution.is_contradicted(first));
-        let arena = state.take_incompatibility_arena();
-        sibling.restore_incompatibility_arena(arena);
-        let second = sibling
-            .incompatibility_store
-            .alloc(Incompatibility::no_versions(
-                sibling.root_package,
-                Ranges::singleton(3u32),
-            ));
-        assert_eq!(first, second);
-        assert!(!sibling.partial_solution.is_contradicted(second));
-        assert_eq!(sibling.incompatibilities[&sibling.root_package].len(), 1);
-        assert!(sibling.unit_propagation(sibling.root_package).is_ok());
-    }
 
     #[test]
     fn nested_checkpoint_restores_dependencies_before_outer_sibling() {

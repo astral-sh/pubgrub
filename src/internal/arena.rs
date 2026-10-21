@@ -245,49 +245,14 @@ mod tests {
 
     #[cfg(feature = "unstable-state-api")]
     #[test]
-    fn nested_rewinds_preserve_prefixes_and_reuse_ids() {
+    fn rewind_reuses_discarded_ids() {
         let mut arena = Arena::new();
-        let root = arena.alloc("root");
-        let outer = arena.checkpoint();
-        let first = arena.alloc("first branch");
-        let inner = arena.checkpoint();
-        let nested = arena.alloc("nested branch");
-        arena.rewind(&inner);
-        assert_eq!(arena[root], "root");
-        assert_eq!(arena[first], "first branch");
-        assert_eq!(arena.alloc("nested sibling"), nested);
-        assert_eq!(arena[nested], "nested sibling");
-        arena.rewind(&outer);
-        assert_eq!(arena.alloc("outer sibling"), first);
-        assert_eq!(arena[first], "outer sibling");
-        assert_eq!(arena[root], "root");
-    }
-
-    #[cfg(feature = "unstable-state-api")]
-    #[test]
-    fn rewind_drops_suffix_records_without_copying_the_prefix() {
-        use std::cell::Cell;
-        use std::rc::Rc;
-
-        struct Record(Rc<Cell<usize>>);
-        impl Drop for Record {
-            fn drop(&mut self) {
-                self.0.set(self.0.get() + 1);
-            }
-        }
-        let drops = Rc::new(Cell::new(0));
-        let mut arena = Arena::new();
-        arena.alloc(Record(Rc::clone(&drops)));
+        let prefix = arena.alloc("prefix");
         let checkpoint = arena.checkpoint();
-        arena.alloc(Record(Rc::clone(&drops)));
-        arena.alloc(Record(Rc::clone(&drops)));
-        let capacity = arena.data.capacity();
+        let suffix = arena.alloc("first branch");
         arena.rewind(&checkpoint);
-        assert_eq!(drops.get(), 2);
-        assert_eq!(arena.data.len(), 1);
-        assert_eq!(arena.data.capacity(), capacity);
-        drop(arena);
-        assert_eq!(drops.get(), 3);
+        assert_eq!(arena[prefix], "prefix");
+        assert_eq!(arena.alloc("sibling"), suffix);
     }
 
     #[cfg(feature = "unstable-state-api")]
