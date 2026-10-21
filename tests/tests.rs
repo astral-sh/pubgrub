@@ -9,6 +9,7 @@ use std::convert::Infallible;
 type NumVS = Ranges<u32>;
 
 /// Sibling forks can contradict the same incompatibility at different decision levels.
+#[cfg(feature = "unstable-state-api")]
 #[test]
 fn cloned_states_keep_contradiction_caches_independent() {
     use pubgrub::State;

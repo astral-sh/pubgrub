@@ -3,6 +3,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
 use std::ops::{Index, Range};
+#[cfg(feature = "unstable-state-api")]
 use std::sync::Arc;
 
 type FnvIndexSet<V> = indexmap::IndexSet<V, rustc_hash::FxBuildHasher>;
@@ -82,10 +83,12 @@ impl<T> Id<T> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Arena<T> {
     data: Vec<T>,
+    #[cfg(feature = "unstable-state-api")]
     checkpoints: Vec<ArenaCheckpoint>,
 }
 
 /// Identifies a live prefix; the token distinguishes stale checkpoints after IDs are reused.
+#[cfg(feature = "unstable-state-api")]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ArenaCheckpoint {
     len: usize,
@@ -102,11 +105,13 @@ impl<T> Arena<T> {
     pub(crate) fn new() -> Self {
         Self {
             data: Vec::new(),
+            #[cfg(feature = "unstable-state-api")]
             checkpoints: Vec::new(),
         }
     }
 
     /// Mark a prefix that remains valid until an earlier checkpoint is restored.
+    #[cfg(feature = "unstable-state-api")]
     pub(crate) fn checkpoint(&mut self) -> ArenaCheckpoint {
         let checkpoint = ArenaCheckpoint {
             len: self.data.len(),
@@ -120,6 +125,7 @@ impl<T> Arena<T> {
     ///
     /// The caller must restore the solver indexes and assignment history from the same checkpoint
     /// before reusing IDs in the discarded suffix. The allocation remains available for reuse.
+    #[cfg(feature = "unstable-state-api")]
     pub(crate) fn rewind(&mut self, checkpoint: &ArenaCheckpoint) {
         let position = self
             .checkpoints
@@ -237,6 +243,7 @@ mod tests {
         assert_eq!(arena[existing], "existing");
     }
 
+    #[cfg(feature = "unstable-state-api")]
     #[test]
     fn nested_rewinds_preserve_prefixes_and_reuse_ids() {
         let mut arena = Arena::new();
@@ -256,6 +263,7 @@ mod tests {
         assert_eq!(arena[root], "root");
     }
 
+    #[cfg(feature = "unstable-state-api")]
     #[test]
     fn rewind_drops_suffix_records_without_copying_the_prefix() {
         use std::cell::Cell;
@@ -282,6 +290,7 @@ mod tests {
         assert_eq!(drops.get(), 3);
     }
 
+    #[cfg(feature = "unstable-state-api")]
     #[test]
     #[should_panic(expected = "arena checkpoint must belong to the current ancestor chain")]
     fn rewind_rejects_a_discarded_descendant_even_after_ids_are_reused() {
@@ -296,6 +305,7 @@ mod tests {
         arena.rewind(&stale);
     }
 
+    #[cfg(feature = "unstable-state-api")]
     #[test]
     #[should_panic(expected = "arena checkpoint must belong to the current ancestor chain")]
     fn rewind_rejects_a_checkpoint_from_another_arena() {

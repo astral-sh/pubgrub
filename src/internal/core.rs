@@ -92,6 +92,7 @@ pub struct State<DP: DependencyProvider> {
     incompatibility_store: Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
 
     /// A suspended state keeps its prefix token while the active branch owns the records.
+    #[cfg(feature = "unstable-state-api")]
     incompatibility_checkpoint: Option<super::arena::ArenaCheckpoint>,
 
     /// The store is the reference storage for all packages.
@@ -107,10 +108,12 @@ pub struct State<DP: DependencyProvider> {
 ///
 /// A suspended [`State`] keeps only a checkpoint. Restore its arena before reading constraints
 /// or advancing the solver. Restoring an ancestor invalidates checkpoints in its old suffix.
+#[cfg(feature = "unstable-state-api")]
 pub struct IncompatibilityArena<DP: DependencyProvider> {
     arena: Arena<Incompatibility<DP::P, DP::VS, DP::M>>,
 }
 
+#[cfg(feature = "unstable-state-api")]
 impl<DP: DependencyProvider> Default for IncompatibilityArena<DP> {
     fn default() -> Self {
         Self {
@@ -119,6 +122,7 @@ impl<DP: DependencyProvider> Default for IncompatibilityArena<DP> {
     }
 }
 
+#[cfg(feature = "unstable-state-api")]
 impl<DP: DependencyProvider> IncompatibilityArena<DP> {
     /// Release a completed branch's suffix before cloning the next suspended solver state.
     pub fn rewind_to(&mut self, state: &State<DP>) {
@@ -148,6 +152,7 @@ impl<DP: DependencyProvider> State<DP> {
             incompatibilities,
             partial_solution: PartialSolution::empty(),
             incompatibility_store,
+            #[cfg(feature = "unstable-state-api")]
             incompatibility_checkpoint: None,
             package_store,
             unit_propagation_buffer: SmallVec::Empty,
@@ -159,6 +164,7 @@ impl<DP: DependencyProvider> State<DP> {
     ///
     /// Clones of the suspended state copy only solver state and its checkpoint, with no arena
     /// records. The scheduler must restore the arena before querying or advancing any clone.
+    #[cfg(feature = "unstable-state-api")]
     pub fn take_incompatibility_arena(&mut self) -> IncompatibilityArena<DP> {
         assert!(
             self.incompatibility_checkpoint.is_none(),
@@ -175,6 +181,7 @@ impl<DP: DependencyProvider> State<DP> {
     /// Pass the arena transferred from this state or one of its descendants. Siblings must run
     /// depth-first: restoring an older prefix invalidates all descendant checkpoint tokens.
     /// The suspended state's indexes and contradiction cache refer only to the retained prefix.
+    #[cfg(feature = "unstable-state-api")]
     pub fn restore_incompatibility_arena(&mut self, mut arena: IncompatibilityArena<DP>) {
         arena.rewind_to(self);
         self.incompatibility_checkpoint = None;
@@ -231,6 +238,7 @@ impl<DP: DependencyProvider> State<DP> {
     }
 
     /// Record a dependency constraint without deciding a package version.
+    #[cfg(feature = "unstable-state-api")]
     pub fn add_dependency(
         &mut self,
         package: Id<DP::P>,
@@ -246,6 +254,7 @@ impl<DP: DependencyProvider> State<DP> {
     ///
     /// Dependent versions with the same dependency range may be merged. Learned
     /// incompatibilities and unavailable-version reasons are excluded.
+    #[cfg(feature = "unstable-state-api")]
     pub fn dependencies(
         &self,
         package: Id<DP::P>,
@@ -474,6 +483,7 @@ impl<DP: DependencyProvider> State<DP> {
     ///
     /// Returns the number of the decisions that were backtracked, or `None` if the package was not
     /// decided on yet.
+    #[cfg(feature = "unstable-state-api")]
     pub fn backtrack_package(&mut self, package: Id<DP::P>) -> Option<u32> {
         let base_decision_level = self.partial_solution.current_decision_level();
         let new_decision_level = self.partial_solution.backtrack_package(package).ok()?;
@@ -826,7 +836,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "unstable-state-api"))]
 mod checkpoint_tests {
     use super::{Incompatibility, State};
     use crate::{OfflineDependencyProvider, Ranges};
