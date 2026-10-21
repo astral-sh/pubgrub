@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+## 0.7.1 - 2026-10-21
+
+### Added
+
+- Add incompatibility arena checkpoints behind `unstable-state-api`, allowing depth-first solver forks to reuse storage without copying its records ([#91](https://github.com/astral-sh/pubgrub/pull/91)).
+
+### Fixed
+
+- Preserve the original version ranges when reporting self-dependencies ([#91](https://github.com/astral-sh/pubgrub/pull/91)).
+
 ## 0.7.0 - 2026-10-21
 
 ### Breaking
