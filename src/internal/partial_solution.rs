@@ -11,6 +11,7 @@ use std::num::NonZeroU32;
 use priority_queue::PriorityQueue;
 use rustc_hash::FxHasher;
 
+use super::incompatibility::ContradictionCache;
 use crate::internal::{
     Arena, HashArena, Id, IncompDpId, IncompId, Incompatibility, Relation, SmallMap, SmallVec,
 };
@@ -100,6 +101,9 @@ pub struct PartialSolution<DP: DependencyProvider> {
     /// For each completed backtrack generation, the highest decision level that remains valid.
     /// The active generation is represented by the missing entry after the end of this vector.
     last_valid_decision_levels: Vec<DecisionLevel>,
+    /// Cached contradictions belong to this partial solution, indexed by incompatibility ID.
+    /// Missing entries have not been marked contradicted.
+    contradiction_cache: Vec<ContradictionCache>,
 }
 
 /// A package assignment is either a decision or a list of (accumulated) derivations without a
@@ -207,24 +211,28 @@ impl<DP: DependencyProvider> PartialSolution<DP> {
             prioritized_potential_packages: PriorityQueue::default(),
             outdated_priorities: FnvIndexSet::default(),
             last_valid_decision_levels: vec![DecisionLevel::ZERO],
+            contradiction_cache: Vec::new(),
         }
     }
 
-    pub(crate) fn is_contradicted(
-        &self,
-        incompatibility: &Incompatibility<DP::P, DP::VS, DP::M>,
-    ) -> bool {
-        incompatibility.is_contradicted(&self.last_valid_decision_levels)
+    /// Return whether a cached contradiction remains valid after this fork's backtracks.
+    pub(crate) fn is_contradicted(&self, incompatibility: IncompDpId<DP>) -> bool {
+        self.contradiction_cache
+            .get(incompatibility.into_raw())
+            .is_some_and(|cache| cache.is_contradicted(&self.last_valid_decision_levels))
     }
 
-    pub(crate) fn mark_contradicted(
-        &self,
-        incompatibility: &mut Incompatibility<DP::P, DP::VS, DP::M>,
-    ) {
-        incompatibility.mark_contradicted(
-            self.current_decision_level(),
-            self.last_valid_decision_levels.len() as u32,
-        );
+    /// Cache a contradiction without mutating the shared incompatibility record.
+    pub(crate) fn mark_contradicted(&mut self, incompatibility: IncompDpId<DP>) {
+        let index = incompatibility.into_raw();
+        if self.contradiction_cache.len() <= index {
+            self.contradiction_cache
+                .resize(index + 1, ContradictionCache::not_contradicted());
+        }
+        self.contradiction_cache[index] = ContradictionCache {
+            decision_level: self.current_decision_level(),
+            backtrack_generation: self.last_valid_decision_levels.len() as u32,
+        };
     }
 
     /// Returns whether at least one backtrack generation has completed.

@@ -2,7 +2,8 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::num::NonZeroU32;
-use std::ops::{Index, IndexMut, Range};
+use std::ops::{Index, Range};
+use std::sync::Arc;
 
 type FnvIndexSet<V> = indexmap::IndexSet<V, rustc_hash::FxBuildHasher>;
 
@@ -77,21 +78,17 @@ impl<T> Id<T> {
     }
 }
 
-/// Yet another index-based arena.
-///
-/// An arena is a kind of simple grow-only allocator, backed by a `Vec`
-/// where all items have the same lifetime, making it easier
-/// to have references between those items.
-/// They are all dropped at once when the arena is dropped.
+/// A fork shares all existing records and starts its own segment on the next append.
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct Arena<T> {
-    data: Vec<T>,
+    data: Vec<(usize, Arc<Vec<T>>)>,
+    len: usize,
 }
 
 impl<T: fmt::Debug> fmt::Debug for Arena<T> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_struct("Arena")
-            .field("len", &self.data.len())
+            .field("len", &self.len)
             .field("data", &self.data)
             .finish()
     }
@@ -105,43 +102,51 @@ impl<T> Default for Arena<T> {
 
 impl<T> Arena<T> {
     pub(crate) fn new() -> Self {
-        Self { data: Vec::new() }
+        Self {
+            data: Vec::new(),
+            len: 0,
+        }
     }
 
     pub(crate) fn alloc(&mut self, value: T) -> Id<T> {
-        let id = Id::from_usize(self.data.len());
-        self.data.push(value);
+        let id = Id::from_usize(self.len);
+        self.tail().push(value);
+        self.len += 1;
         id
     }
 
+    fn tail(&mut self) -> &mut Vec<T> {
+        if self
+            .data
+            .last()
+            .is_none_or(|(_, tail)| Arc::strong_count(tail) > 1)
+        {
+            self.data.push((self.len, Arc::default()));
+        }
+        Arc::get_mut(&mut self.data.last_mut().unwrap().1).unwrap()
+    }
+
     pub(crate) fn alloc_iter<I: Iterator<Item = T>>(&mut self, values: I) -> Range<Id<T>> {
-        let start = Id::from_usize(self.data.len());
-        self.data.reserve(values.size_hint().0);
-        values.for_each(|v| {
-            self.alloc(v);
-        });
-        let end = Id::from_usize(self.data.len());
-        Range { start, end }
+        let start = Id::from_usize(self.len);
+        let tail = self.tail();
+        let before = tail.len();
+        tail.extend(values);
+        self.len += tail.len() - before;
+        start..Id::from_usize(self.len)
     }
 }
 
 impl<T> Index<Id<T>> for Arena<T> {
     type Output = T;
     fn index(&self, id: Id<T>) -> &T {
-        &self.data[id.into_raw()]
-    }
-}
-
-impl<T> IndexMut<Id<T>> for Arena<T> {
-    fn index_mut(&mut self, id: Id<T>) -> &mut Self::Output {
-        &mut self.data[id.into_raw()]
-    }
-}
-
-impl<T> Index<Range<Id<T>>> for Arena<T> {
-    type Output = [T];
-    fn index(&self, id: Range<Id<T>>) -> &[T] {
-        &self.data[id.start.into_raw()..id.end.into_raw()]
+        let index = id.into_raw();
+        let (start, tail) = self.data.last().unwrap();
+        if index >= *start {
+            return &tail[index - start];
+        }
+        let pos = self.data.partition_point(|(start, _)| *start <= index) - 1;
+        let (start, segment) = &self.data[pos];
+        &segment[index - start]
     }
 }
 
@@ -201,6 +206,18 @@ mod tests {
     use super::{Arena, Id};
 
     #[test]
+    fn forks_can_append_at_the_same_id() {
+        let mut parent = Arena::new();
+        let prefix = parent.alloc("prefix");
+        let mut child = parent.clone();
+        let id = child.alloc("child");
+        let nested = child.clone();
+        assert_eq!(parent.alloc("parent"), id);
+        assert!(std::ptr::eq(&parent[prefix], &nested[prefix]));
+        assert_eq!((parent[id], nested[id]), ("parent", "child"));
+    }
+
+    #[test]
     fn alloc_iter_preserves_order_and_duplicates() {
         let mut arena = Arena::new();
         let existing = arena.alloc("existing".to_owned());
@@ -223,7 +240,7 @@ mod tests {
         let empty = arena.alloc_iter(std::iter::empty::<String>());
         assert_eq!(empty.start.into_raw(), 4);
         assert_eq!(empty.end.into_raw(), 4);
-        assert_eq!(arena.data.len(), 4);
+        assert_eq!(arena.len, 4);
         assert_eq!(arena[existing], "existing");
     }
 }

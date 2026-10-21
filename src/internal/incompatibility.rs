@@ -13,22 +13,22 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-struct ContradictionCache {
+pub(super) struct ContradictionCache {
     /// The decision level where this incompatibility became contradicted.
-    decision_level: DecisionLevel,
+    pub(super) decision_level: DecisionLevel,
     /// The backtrack generation for that decision level.
-    backtrack_generation: u32,
+    pub(super) backtrack_generation: u32,
 }
 
 impl ContradictionCache {
-    fn not_contradicted() -> Self {
+    pub(super) fn not_contradicted() -> Self {
         Self {
             decision_level: DecisionLevel::MAX,
             backtrack_generation: 0,
         }
     }
 
-    fn is_contradicted(&self, last_valid_decision_levels: &[DecisionLevel]) -> bool {
+    pub(super) fn is_contradicted(&self, last_valid_decision_levels: &[DecisionLevel]) -> bool {
         // The active generation has no backtrack target yet, so every contradiction recorded in
         // it remains valid. Completed generations store the highest decision level that survived
         // their first invalidating backtrack.
@@ -58,7 +58,6 @@ impl ContradictionCache {
 pub(crate) struct Incompatibility<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     package_terms: SmallMap<Id<P>, Term<VS>>,
     kind: Kind<P, VS, M>,
-    contradiction_cache: ContradictionCache,
 }
 
 /// Type alias of unique identifiers for incompatibilities.
@@ -90,6 +89,8 @@ enum Kind<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> {
     /// We can merge multiple dependents with the same version. For example, if a@1 depends on b and
     /// a@2 depends on b, we can say instead a@1||2 depends on b.
     FromDependencyOf(Id<P>, Id<P>),
+    /// Propagation merges a self-dependency's terms. Diagnostics use the original ranges.
+    FromSelfDependencyOf(Id<P>, Box<(VS, VS)>),
     /// Derived from two causes. Stores cause ids.
     ///
     /// For example, if a -> b and b -> c, we can derive a -> c.
@@ -128,7 +129,6 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 Term::Negative(VS::singleton(version.clone())),
             )]),
             kind: Kind::NotRoot(package, version),
-            contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
@@ -137,7 +137,6 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         Self {
             package_terms: SmallMap::One([(package, Term::Positive(versions.clone()))]),
             kind: Kind::NoVersions(package, versions),
-            contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
@@ -146,13 +145,13 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         Self {
             package_terms: SmallMap::One([(package, Term::Positive(versions.clone()))]),
             kind: Kind::Custom(package, versions, metadata),
-            contradiction_cache: ContradictionCache::not_contradicted(),
         }
     }
 
     /// Build an incompatibility from a given dependency.
     pub(crate) fn from_dependency(package: Id<P>, versions: VS, dep: (Id<P>, VS)) -> Self {
         let (p2, set2) = dep;
+        let mut kind = Kind::FromDependencyOf(package, p2);
         Self {
             package_terms: if set2 == VS::empty() {
                 SmallMap::One([(package, Term::Positive(versions))])
@@ -161,6 +160,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 // Possible and impossible self-dependencies may have overlapping version ranges,
                 // incompatible is only the impossible one.
                 let incompatible = versions.difference(&set2);
+                kind = Kind::FromSelfDependencyOf(package, Box::new((versions, set2)));
                 SmallMap::One([(package, Term::Positive(incompatible))])
             } else {
                 SmallMap::Two([
@@ -168,12 +168,14 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                     (p2, Term::Negative(set2)),
                 ])
             },
-            kind: Kind::FromDependencyOf(package, p2),
-            contradiction_cache: ContradictionCache::not_contradicted(),
+            kind,
         }
     }
 
     fn dependency_terms(&self, p1: Id<P>, p2: Id<P>) -> (&VS, Option<&VS>) {
+        if let Kind::FromSelfDependencyOf(_, ranges) = &self.kind {
+            return (&ranges.0, Some(&ranges.1));
+        }
         let mut terms = self.package_terms.iter();
         let versions = match terms.next() {
             Some((term_package, Term::Positive(versions))) if *term_package == p1 => versions,
@@ -194,6 +196,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
     pub(crate) fn as_dependency(&self) -> Option<(Id<P>, Id<P>)> {
         match &self.kind {
             Kind::FromDependencyOf(p1, p2) => Some((*p1, *p2)),
+            Kind::FromSelfDependencyOf(p, _) => Some((*p, *p)),
             _ => None,
         }
     }
@@ -281,24 +284,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
         Self {
             package_terms,
             kind,
-            contradiction_cache: ContradictionCache::not_contradicted(),
         }
-    }
-
-    pub(crate) fn is_contradicted(&self, last_valid_decision_levels: &[DecisionLevel]) -> bool {
-        self.contradiction_cache
-            .is_contradicted(last_valid_decision_levels)
-    }
-
-    pub(crate) fn mark_contradicted(
-        &mut self,
-        decision_level: DecisionLevel,
-        backtrack_generation: u32,
-    ) {
-        self.contradiction_cache = ContradictionCache {
-            decision_level,
-            backtrack_generation,
-        };
     }
 
     /// Check if an incompatibility should mark the end of the algorithm
@@ -371,7 +357,7 @@ impl<P: Package, VS: VersionSet, M: Eq + Clone + Debug + Display> Incompatibilit
                 package_store[package].clone(),
                 set.clone(),
             )),
-            Kind::FromDependencyOf(_, _) => {
+            Kind::FromDependencyOf(_, _) | Kind::FromSelfDependencyOf(_, _) => {
                 let dependency = store[self_id]
                     .dependency()
                     .expect("expected a dependency incompatibility");
@@ -558,13 +544,11 @@ pub(crate) mod tests {
             let i1 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([(p1, t1.clone()), (p2, t2.negate())]),
                 kind: Kind::<_, _, String>::FromDependencyOf(p1, p2),
-                contradiction_cache: ContradictionCache::not_contradicted(),
             });
 
             let i2 = store.alloc(Incompatibility {
                 package_terms: SmallMap::Two([(p2, t2), (p3, t3.clone())]),
                 kind: Kind::<_, _, String>::FromDependencyOf(p2, p3),
-                contradiction_cache: ContradictionCache::not_contradicted(),
             });
 
             let mut i3 = Map::default();
@@ -661,17 +645,18 @@ pub(crate) mod tests {
             &empty,
         );
 
-        // Self-dependencies retain only the forbidden versions and an empty dependency range.
+        // Propagation merges self-dependency terms, but diagnostics retain the original ranges.
+        let self_dependency_versions = Ranges::between(2usize, 4usize);
         assert_dependency_tree(
             &package_store,
             Incompatibility::from_dependency(
                 package,
                 versions.clone(),
-                (package, Ranges::between(2usize, 4usize)),
+                (package, self_dependency_versions.clone()),
             ),
-            &Ranges::between(1usize, 2usize),
+            &versions,
             "package",
-            &empty,
+            &self_dependency_versions,
         );
 
         let first: Incompatibility<String, Ranges<usize>, String> =
