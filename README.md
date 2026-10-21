@@ -2,7 +2,7 @@
 
 [![guide](https://img.shields.io/badge/guide-pubgrub-pink?logo=read-the-docs)][guide]
 [![docs.rs](https://img.shields.io/badge/docs.rs-pubgrub-yellow)][docs]
-[![crates.io](https://img.shields.io/crates/v/pubgrub.svg?logo=rust)][crates]
+[![crates.io](https://img.shields.io/crates/v/astral-pubgrub.svg?logo=rust)][crates]
 
 PubGrub is a high performance version resolution algorithm with good error
 messages, it finds a set of packages and versions that satisfy all the
@@ -89,7 +89,7 @@ know with a private message on Zulip if you don't feel that way.
 [uv]: https://docs.astral.sh/uv/reference/internals/resolver
 [bundler]: https://bundler.io/blog/2023/01/31/bundler-v2-4.html
 [poetry]: https://github.com/sdispater/mixology
-[crates]: https://crates.io/crates/pubgrub
+[crates]: https://crates.io/crates/astral-pubgrub
 [guide]: https://pubgrub-rs-guide.pages.dev
 [guide-internals]: https://pubgrub-rs-guide.pages.dev/internals/intro.html
 [docs]: https://docs.rs/pubgrub
