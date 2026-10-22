@@ -8,6 +8,79 @@ use std::convert::Infallible;
 
 type NumVS = Ranges<u32>;
 
+#[cfg(feature = "unstable-state-api")]
+#[test]
+fn discarded_solver_state_retains_dependencies_and_arena() {
+    use pubgrub::State;
+
+    type Provider = OfflineDependencyProvider<&'static str, NumVS>;
+
+    let mut state: State<Provider> = State::init("root", 0);
+    state.unit_propagation(state.root_package).unwrap();
+    assert!(
+        state
+            .add_package_version_dependencies(
+                state.root_package,
+                0,
+                Ranges::singleton(0u32),
+                [("foo", Ranges::full())],
+            )
+            .is_none()
+    );
+    state.unit_propagation(state.root_package).unwrap();
+    let foo = state.package_store.alloc("foo");
+    let arena = state.take_incompatibility_arena();
+    let mut sibling = state.clone();
+    state.restore_incompatibility_arena(arena);
+    assert!(
+        state
+            .add_package_version_dependencies(foo, 1, Ranges::singleton(1u32), [])
+            .is_none()
+    );
+    state.unit_propagation(foo).unwrap();
+
+    let solution: Vec<_> = state.partial_solution.extract_solution().collect();
+    state.discard_solver_state();
+
+    assert_eq!(solution, [(state.root_package, 0), (foo, 1)]);
+    assert_eq!(state.package_store[foo], "foo");
+    let dependencies: Vec<_> = state
+        .dependencies(state.root_package)
+        .map(|dependency| {
+            (
+                dependency.dependent,
+                dependency.dependent_versions.clone(),
+                dependency.dependency,
+                dependency.dependency_versions.cloned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        dependencies,
+        [(
+            state.root_package,
+            Ranges::singleton(0u32),
+            foo,
+            Some(Ranges::full())
+        )]
+    );
+
+    sibling.restore_incompatibility_arena(state.take_incompatibility_arena());
+    assert!(
+        sibling
+            .add_package_version_dependencies(foo, 2, Ranges::singleton(2u32), [])
+            .is_none()
+    );
+    sibling.unit_propagation(foo).unwrap();
+    assert_eq!(
+        sibling
+            .partial_solution
+            .extract_solution()
+            .collect::<Vec<_>>(),
+        [(sibling.root_package, 0), (foo, 2)]
+    );
+}
+
 /// Sibling forks can reuse incompatibility IDs without sharing cached contradictions.
 #[cfg(feature = "unstable-state-api")]
 #[test]

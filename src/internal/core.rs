@@ -268,6 +268,18 @@ impl<DP: DependencyProvider> State<DP> {
             .filter_map(|&id| self.incompatibility_store[id].dependency())
     }
 
+    /// Release assignment history and other working state after extracting an owned solution.
+    ///
+    /// This is a terminal operation: solving must not resume on this state. Package lookups,
+    /// [`Self::dependencies`], and transferring the incompatibility arena remain available so a
+    /// caller can construct its result without retaining the solver's working allocations.
+    #[cfg(feature = "unstable-state-api")]
+    pub fn discard_solver_state(&mut self) {
+        self.partial_solution = PartialSolution::empty();
+        self.merged_dependencies = MergedDependencies::default();
+        self.unit_propagation_buffer = SmallVec::Empty;
+    }
+
     /// Iterate over the packages participating in a conflict.
     pub fn conflict_packages(&self, conflict: &ConflictId<DP>) -> impl Iterator<Item = Id<DP::P>> {
         self.incompatibility_store[conflict.0]
